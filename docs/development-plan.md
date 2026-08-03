@@ -82,7 +82,8 @@
 3. 已完成：实现 Supabase RPC 读写适配。
 4. 已完成：提供 Supabase 初始化 SQL：`supabase/schema.sql`。
 5. 已完成：提供 GitHub Pages 与 Supabase 上线指南：`docs/deployment-guide.md`。
-6. 待完成：填入真实 Supabase Project URL 和 anon public key 后，验证在线多人流程。
+6. 已完成：填入真实 Supabase Project URL 和 publishable key。
+7. 待完成：运行 `supabase/schema.sql` 后，验证在线多人流程。
 
 验收：
 
@@ -101,12 +102,11 @@
 
 1. 已确定：数据库使用 Supabase。
 2. 已确定：部署使用 GitHub Pages。
-3. 待用户提供或授权：Supabase Project URL、anon public key。
-4. 待用户提供或授权：GitHub 仓库位置或创建仓库权限。
-5. 待执行：运行 `supabase/schema.sql`。
-6. 待执行：更新 `src/config.js`。
-7. 待执行：上传到 GitHub Pages。
-8. 待执行：用至少两个设备或浏览器验证。
+3. 已完成：Supabase Project URL 和 publishable key 已配置。
+4. 已完成：GitHub 仓库 `ROHOOOOO/100-qas` 已创建。
+5. 已完成：上传到 GitHub Pages。
+6. 待执行：运行 `supabase/schema.sql`。
+7. 待执行：用至少两个设备或浏览器验证。
 
 验收：
 

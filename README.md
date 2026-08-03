@@ -48,6 +48,18 @@
 - 已完成 100 题填满、提交确认、提交锁定、结果页展示的完整自动化验证。
 - 已完成本地多人模拟：可新增/切换本地玩家，展示房间人数和提交人数，并验证未提交玩家不能查看结果。
 - 已加入 Supabase 在线模式配置入口，支持后续部署到 GitHub Pages 后直接多人在线填写。
+- GitHub 仓库已创建：[ROHOOOOO/100-qas](https://github.com/ROHOOOOO/100-qas)
+- GitHub Pages 已发布：[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
+
+## 当前上线状态
+
+网页已经上线，但 Supabase 数据库函数还未创建。请在 Supabase 的 SQL Editor 中运行：
+
+```text
+supabase/schema.sql
+```
+
+运行完成后，线上网页就可以创建房间、邀请朋友、填写、提交和查看结果。
 
 ## 验证命令
 

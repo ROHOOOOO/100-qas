@@ -39,3 +39,9 @@
 - 新增 Supabase 初始化 SQL：`supabase/schema.sql`。
 - 新增上线与分享指南：`docs/deployment-guide.md`。
 - 确认新增线上适配后，本地完整浏览器验证仍然通过。
+- 根据用户提供的信息，将 `src/config.js` 切换到 Supabase 在线模式。
+- 创建 GitHub 仓库：`ROHOOOOO/100-qas`。
+- 推送项目代码到 GitHub。
+- 开启 GitHub Pages，线上地址为 `https://rohooooo.github.io/100-qas/`。
+- 验证 GitHub Pages 返回 HTTP 200，页面已发布。
+- 检测 Supabase RPC，确认 `qa_get_room` 仍未创建，说明还需要在 Supabase SQL Editor 运行 `supabase/schema.sql`。

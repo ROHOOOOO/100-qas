@@ -16,6 +16,18 @@
 - GitHub Pages 可以免费托管静态网页。
 - Supabase 保存房间、玩家和答案。
 
+## 当前项目地址
+
+- GitHub 仓库：[https://github.com/ROHOOOOO/100-qas](https://github.com/ROHOOOOO/100-qas)
+- GitHub Pages：[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
+- Supabase Project URL：`https://yexwacezlklxqlmwgtfe.supabase.co`
+
+当前状态：
+
+- GitHub Pages 已发布。
+- `src/config.js` 已切换到 Supabase 在线模式。
+- 仍需在 Supabase SQL Editor 中运行 `supabase/schema.sql`。
+
 ## 使用流程
 
 上线后，朋友的流程是：
@@ -42,7 +54,13 @@
 
 ### 2. 运行数据库 SQL
 
-打开 Supabase 的 SQL Editor，运行：
+打开 Supabase 项目，进入：
+
+```text
+SQL Editor → New query
+```
+
+然后复制并运行：
 
 ```text
 supabase/schema.sql
@@ -86,6 +104,16 @@ window.QA_CONFIG = {
   backend: "supabase",
   supabaseUrl: "你的 Project URL",
   supabaseAnonKey: "你的 anon public key"
+};
+```
+
+本项目已经填好：
+
+```js
+window.QA_CONFIG = {
+  backend: "supabase",
+  supabaseUrl: "https://yexwacezlklxqlmwgtfe.supabase.co",
+  supabaseAnonKey: "sb_publishable_oKxZ2ME69FONBMxap55C6A_PLlKGHXu"
 };
 ```
 
@@ -148,4 +176,3 @@ https://yourname.github.io/100-qas/
 - 不做注册账号。
 - 用户换浏览器或清除浏览器数据后，可能无法继续原来的草稿。
 - 提交后不能修改。
-
