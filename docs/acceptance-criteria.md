@@ -48,6 +48,7 @@
 
 - `scripts/verify-browser.mjs` 已覆盖两人本地模拟。
 - 验证结果：2 人加入，1 人提交；未提交玩家停留在答题页，切换回已提交玩家后能查看结果。
+- `scripts/verify-browser.mjs` 已覆盖上传自定义题库并创建房间。
 
 ## 阶段 4 验收
 
@@ -63,3 +64,8 @@
 - Supabase 已运行最新版 `supabase/schema.sql`。
 - `src/config.js` 已填入 Supabase Project URL 和 anon public key。
 - GitHub Pages 已托管当前静态文件。
+
+当前验证状态：
+
+- `scripts/verify-online.mjs` 已通过。
+- 验证结果：自定义题库线上房间 `25F8CE` 中 2 位玩家均提交 100 题，结果页显示 100 个题目卡、200 条答案，并确认第 23 题来自该房间自定义题库。
