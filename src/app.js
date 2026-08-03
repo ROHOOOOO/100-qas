@@ -186,7 +186,11 @@
   }
 
   function parseQuestionText(rawText) {
-    return String(rawText || "")
+    var normalizedText = String(rawText || "")
+      .replace(/\r/g, "\n")
+      .replace(/([^\n])\s+((?:Q\s*)?\d{1,3}\s*[.、):：-]\s*)/gi, "$1\n$2");
+
+    return normalizedText
       .split(/\r?\n/)
       .map(function (line) { return pickQuestionFromLine(line); })
       .filter(Boolean);
@@ -239,6 +243,30 @@
     }
 
     return "已识别 " + roomQuestions.length + " / " + QUESTION_TARGET + " 题";
+  }
+
+  function questionBankProblem(roomQuestions) {
+    var tooLong = roomQuestions.some(function (question) {
+      return question.length > MAX_QUESTION_LENGTH;
+    });
+
+    if (tooLong) {
+      return "有题目超过 " + MAX_QUESTION_LENGTH + " 字，请缩短后再生成房间。";
+    }
+
+    if (roomQuestions.length === QUESTION_TARGET) {
+      return "";
+    }
+
+    if (roomQuestions.length === 0) {
+      return "还没有识别到题目。可以每题一行，或使用 1. 2. 3. 这样的编号。";
+    }
+
+    if (roomQuestions.length > QUESTION_TARGET) {
+      return "已识别 " + roomQuestions.length + " 题，请保留 " + QUESTION_TARGET + " 题后再生成房间。";
+    }
+
+    return "已识别 " + roomQuestions.length + " / " + QUESTION_TARGET + " 题，还差 " + (QUESTION_TARGET - roomQuestions.length) + " 题。";
   }
 
   function resetCreateRoomDraft() {
@@ -454,7 +482,6 @@
   function renderCreateRoom() {
     var selectedQuestions = getSelectedCreateQuestions();
     var isDefault = createRoomDraft.mode === "default";
-    var isReady = isQuestionBankReady(selectedQuestions);
     var previewQuestions = selectedQuestions.slice(0, 3);
 
     app.innerHTML = [
@@ -490,7 +517,7 @@
       '      </section>',
       '      <div class="dialog-actions">',
       '        <button type="button" class="secondary-button" data-action="go-home">返回</button>',
-      '        <button class="primary-button" type="submit" data-create-submit ' + (isReady ? "" : "disabled") + '>生成房间</button>',
+      '        <button class="primary-button" type="submit" data-create-submit>生成房间</button>',
       '      </div>',
       '    </form>',
       '  </section>',
@@ -729,7 +756,7 @@
     var isCustom = createRoomDraft.mode === "custom";
 
     if (!isQuestionBankReady(selectedQuestions)) {
-      showToast("题库需要正好 " + QUESTION_TARGET + " 题。");
+      showToast(questionBankProblem(selectedQuestions));
       return;
     }
 
@@ -815,9 +842,7 @@
       }).join("");
     }
 
-    if (submit) {
-      submit.disabled = !isQuestionBankReady(selectedQuestions);
-    }
+    if (submit) submit.disabled = false;
   }
 
   function loadQuestionFile(file) {
