@@ -49,8 +49,10 @@ assert(appJs.includes("renderRoomSummary"), "Room summary renderer must exist.")
 assert(appJs.includes("renderLocalPlayers"), "Local player list renderer must exist.");
 assert(appJs.includes("getRoomQuestions"), "App must read questions from each room.");
 assert(appJs.includes("parseQuestionText"), "App must support pasted/uploaded question banks.");
+assert(appJs.includes("questionBankProblem"), "App must explain invalid question bank input after clicking create.");
 assert(appJs.includes('data-question-file'), "App must expose a question bank file input.");
 assert(appJs.includes('data-question-bank'), "App must expose a pasted question bank input.");
+assert(!appJs.includes("data-create-submit disabled"), "Custom question bank create button should stay clickable for feedback.");
 assert(appJs.includes('data-action="switch-player"'), "Local player switching action must exist.");
 assert(stylesCss.includes(".modal-backdrop"), "Submit dialog backdrop styles must exist.");
 assert(stylesCss.includes(".confirm-dialog"), "Submit dialog styles must exist.");
