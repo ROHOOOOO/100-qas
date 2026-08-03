@@ -1,6 +1,5 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -30,8 +29,6 @@ function assert(condition, message) {
 const { chromium } = loadPlaywright();
 const appUrl = pathToFileURL(join(process.cwd(), "index.html")).href + "?backend=local";
 const customQuestions = Array.from({ length: 100 }, (_, index) => `自定义问题 ${index + 1}?`);
-const customQuestionsPath = join(tmpdir(), "100-qas-custom-questions.txt");
-writeFileSync(customQuestionsPath, customQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n"));
 
 async function launchBrowser() {
   try {
@@ -66,7 +63,13 @@ try {
   await page.getByRole("button", { name: "创建房间" }).click();
   await page.getByRole("heading", { name: "创建房间" }).waitFor();
   await page.getByRole("button", { name: "自定义题库" }).click();
-  await page.getByLabel("上传题库文件").setInputFiles(customQuestionsPath);
+  assert(await page.getByRole("button", { name: "生成房间" }).isEnabled(), "Create room button should stay clickable for feedback.");
+
+  await page.getByLabel("粘贴题目").fill("1. 只有一道测试题");
+  await page.getByRole("button", { name: "生成房间" }).click();
+  await page.getByText("已识别 1 / 100 题，还差 99 题。").waitFor();
+
+  await page.getByLabel("粘贴题目").fill(customQuestions.map((question, index) => `${index + 1}. ${question}`).join(" "));
   await page.getByText("已识别 100 / 100 题").waitFor();
   await page.getByRole("button", { name: "生成房间" }).click();
 
