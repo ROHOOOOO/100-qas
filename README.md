@@ -54,8 +54,7 @@
 - GitHub Pages 已发布：[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
 - Supabase 数据库 SQL 已运行。
 - 线上双玩家完整验收已通过：创建房间、加入昵称、填写 100 题、提交锁定、结果页按题展示 2 位玩家答案。
-
-说明：基础多人答题版已经上线可用。房间级自定义题库改造发布后，需要在 Supabase SQL Editor 中再次运行最新版 `supabase/schema.sql`，让线上数据库增加题库字段和新版创建房间函数。
+- 房间级自定义题库 SQL 已运行，线上自定义题库双玩家验收已通过。
 
 ## 当前上线状态
 
