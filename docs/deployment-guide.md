@@ -28,7 +28,8 @@
 - `src/config.js` 已切换到 Supabase 在线模式。
 - 基础多人答题版已在 Supabase SQL Editor 中运行过 `supabase/schema.sql`。
 - 基础线上双玩家验收已通过。
-- 房间级自定义题库改造后，需要再次运行最新版 `supabase/schema.sql`。
+- 房间级自定义题库 SQL 已运行。
+- 自定义题库线上双玩家验收已通过。
 
 ## 使用流程
 
