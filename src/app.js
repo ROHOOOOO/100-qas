@@ -3,6 +3,7 @@
   var IDENTITY_KEY = "hundred-qas-current-players-v1";
   var PAGE_SIZE = 5;
   var QUESTION_TARGET = 100;
+  var QUESTION_MINIMUM = 1;
   var MAX_QUESTION_LENGTH = 240;
   var MAX_QUESTION_FILE_BYTES = 120 * 1024;
   var defaultQuestions = window.QA_QUESTIONS || [];
@@ -206,10 +207,18 @@
 
   function getRoomQuestions(room) {
     var roomQuestions = normalizeQuestionArray(room && room.questions);
-    if (roomQuestions.length === QUESTION_TARGET) {
+    if (isValidStoredQuestionBank(roomQuestions)) {
       return roomQuestions;
     }
     return defaultQuestions.slice();
+  }
+
+  function isValidStoredQuestionBank(roomQuestions) {
+    return roomQuestions.length >= QUESTION_MINIMUM
+      && roomQuestions.length <= QUESTION_TARGET
+      && roomQuestions.every(function (question) {
+        return question.length <= MAX_QUESTION_LENGTH;
+      });
   }
 
   function getSelectedCreateQuestions() {
@@ -220,9 +229,11 @@
   }
 
   function isQuestionBankReady(roomQuestions) {
-    return roomQuestions.length === QUESTION_TARGET && roomQuestions.every(function (question) {
-      return question.length <= MAX_QUESTION_LENGTH;
-    });
+    return roomQuestions.length >= QUESTION_MINIMUM
+      && roomQuestions.length <= QUESTION_TARGET
+      && roomQuestions.every(function (question) {
+        return question.length <= MAX_QUESTION_LENGTH;
+      });
   }
 
   function questionBankStatus(roomQuestions) {
@@ -234,15 +245,15 @@
       return "有题目超过 " + MAX_QUESTION_LENGTH + " 字，请缩短后再创建。";
     }
 
-    if (roomQuestions.length === QUESTION_TARGET) {
-      return "已识别 " + QUESTION_TARGET + " / " + QUESTION_TARGET + " 题";
+    if (roomQuestions.length === 0) {
+      return "还没有识别到题目";
     }
 
     if (roomQuestions.length > QUESTION_TARGET) {
       return "已识别 " + roomQuestions.length + " 题，请保留 " + QUESTION_TARGET + " 题。";
     }
 
-    return "已识别 " + roomQuestions.length + " / " + QUESTION_TARGET + " 题";
+    return "已识别 " + roomQuestions.length + " 题，可以生成房间";
   }
 
   function questionBankProblem(roomQuestions) {
@@ -254,10 +265,6 @@
       return "有题目超过 " + MAX_QUESTION_LENGTH + " 字，请缩短后再生成房间。";
     }
 
-    if (roomQuestions.length === QUESTION_TARGET) {
-      return "";
-    }
-
     if (roomQuestions.length === 0) {
       return "还没有识别到题目。可以每题一行，或使用 1. 2. 3. 这样的编号。";
     }
@@ -266,7 +273,7 @@
       return "已识别 " + roomQuestions.length + " 题，请保留 " + QUESTION_TARGET + " 题后再生成房间。";
     }
 
-    return "已识别 " + roomQuestions.length + " / " + QUESTION_TARGET + " 题，还差 " + (QUESTION_TARGET - roomQuestions.length) + " 题。";
+    return "";
   }
 
   function resetCreateRoomDraft() {
@@ -780,7 +787,7 @@
         resetCreateRoomDraft();
         setRoute("room/" + onlineRoom.code);
       } catch (error) {
-        showToast(isCustom ? "自定义题库需要先升级 Supabase SQL。" : "线上房间创建失败，请检查 Supabase 配置。");
+        showToast(isCustom ? "自定义题库线上创建失败，请确认已运行最新版 Supabase SQL。" : "线上房间创建失败，请检查 Supabase 配置。");
       }
       return;
     }
@@ -1064,7 +1071,7 @@
         render({ skipOnlineSync: true });
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (error) {
-        showToast("提交失败，请确认 100 题都已填写并稍后再试。");
+        showToast("提交失败，请确认所有题目都已填写并稍后再试。");
       }
       return;
     }

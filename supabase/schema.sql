@@ -96,13 +96,13 @@ begin
       'title', v_room.title,
       'questions', case
         when jsonb_typeof(v_room.questions) = 'array'
-         and jsonb_array_length(v_room.questions) = 100
+         and jsonb_array_length(v_room.questions) between 1 and 100
         then v_room.questions
         else null
       end,
       'questionCount', case
         when jsonb_typeof(v_room.questions) = 'array'
-         and jsonb_array_length(v_room.questions) > 0
+         and jsonb_array_length(v_room.questions) between 1 and 100
         then jsonb_array_length(v_room.questions)
         else 100
       end,
@@ -186,8 +186,12 @@ begin
      where jsonb_typeof(question_item.value) = 'string'
        and btrim(question_item.value #>> '{}') <> '';
 
-    if jsonb_array_length(v_questions) <> 100 then
-      raise exception 'Question bank must contain exactly 100 questions.';
+    if jsonb_array_length(v_questions) = 0 then
+      raise exception 'Question bank must contain at least 1 question.';
+    end if;
+
+    if jsonb_array_length(v_questions) > 100 then
+      raise exception 'Question bank can contain at most 100 questions.';
     end if;
   end if;
 
@@ -312,7 +316,7 @@ begin
 
   v_required_count := case
     when jsonb_typeof(v_room.questions) = 'array'
-     and jsonb_array_length(v_room.questions) > 0
+     and jsonb_array_length(v_room.questions) between 1 and 100
     then jsonb_array_length(v_room.questions)
     else 100
   end;
@@ -374,7 +378,7 @@ begin
 
   v_required_count := case
     when jsonb_typeof(v_room.questions) = 'array'
-     and jsonb_array_length(v_room.questions) > 0
+     and jsonb_array_length(v_room.questions) between 1 and 100
     then jsonb_array_length(v_room.questions)
     else 100
   end;

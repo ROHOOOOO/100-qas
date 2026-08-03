@@ -58,31 +58,32 @@ function collectPageHealth(page, label, health) {
   });
 }
 
-async function joinAndSubmit(page, nickname, answerPrefix) {
+async function joinAndSubmit(page, nickname, answerPrefix, questionCount) {
   await page.getByRole("heading", { name: "加入这局 100 Q&As" }).waitFor({ timeout: 20000 });
   await page.getByLabel("昵称").fill(nickname);
   await page.getByRole("button", { name: "开始答题" }).click();
   await page.locator('textarea[data-question="1"]').waitFor({ timeout: 20000 });
 
-  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+  const pageCount = Math.ceil(questionCount / 5);
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
     const startNumber = pageIndex * 5 + 1;
+    const endNumber = Math.min(startNumber + 4, questionCount);
 
     await page.locator(`textarea[data-question="${startNumber}"]`).waitFor({ timeout: 15000 });
 
-    for (let offset = 0; offset < 5; offset += 1) {
-      const questionNumber = startNumber + offset;
+    for (let questionNumber = startNumber; questionNumber <= endNumber; questionNumber += 1) {
       await page.locator(`textarea[data-question="${questionNumber}"]`).fill(`${answerPrefix} ${questionNumber}`);
     }
 
-    if (pageIndex < 19) {
+    if (pageIndex < pageCount - 1) {
       await page.getByRole("button", { name: "下一页" }).click();
     }
   }
 
-  await page.getByText("100 / 100 已回答").waitFor({ timeout: 15000 });
+  await page.getByText(`${questionCount} / ${questionCount} 已回答`).waitFor({ timeout: 15000 });
 
   const submitButton = page.getByRole("button", { name: "提交答案" });
-  assert(await submitButton.isEnabled(), `${nickname} should be able to submit after 100 answers.`);
+  assert(await submitButton.isEnabled(), `${nickname} should be able to submit after all answers.`);
 
   await submitButton.click();
   await page.getByRole("heading", { name: "确认提交吗?" }).waitFor({ timeout: 15000 });
@@ -102,7 +103,7 @@ async function waitForHeroImage(page) {
 
 const { chromium } = loadPlaywright();
 const appUrl = process.env.QA_ONLINE_URL || "https://rohooooo.github.io/100-qas/";
-const customQuestions = Array.from({ length: 100 }, (_, index) => `线上自定义问题 ${index + 1}?`);
+const customQuestions = Array.from({ length: 3 }, (_, index) => `线上自定义问题 ${index + 1}?`);
 const resultScreenshot = join(tmpdir(), "100-qas-online-results.png");
 const mobileScreenshot = join(tmpdir(), "100-qas-online-mobile.png");
 const health = { logs: [] };
@@ -121,46 +122,45 @@ try {
   await pageA.getByRole("heading", { name: "创建房间" }).waitFor({ timeout: 20000 });
   await pageA.getByRole("button", { name: "自定义题库" }).click();
   assert(await pageA.getByRole("button", { name: "生成房间" }).isEnabled(), "Create room button should stay clickable for feedback.");
-  await pageA.getByLabel("粘贴题目").fill("1. 只有一道线上测试题");
   await pageA.getByRole("button", { name: "生成房间" }).click();
-  await pageA.getByText("已识别 1 / 100 题，还差 99 题。").waitFor({ timeout: 15000 });
+  await pageA.getByText("还没有识别到题目。可以每题一行，或使用 1. 2. 3. 这样的编号。").waitFor({ timeout: 15000 });
   await pageA.getByLabel("粘贴题目").fill(customQuestions.map((question, index) => `${index + 1}. ${question}`).join(" "));
-  await pageA.getByText("已识别 100 / 100 题").waitFor({ timeout: 15000 });
+  await pageA.getByText("已识别 3 题，可以生成房间").waitFor({ timeout: 15000 });
   await pageA.getByRole("button", { name: "生成房间" }).click();
 
-  await joinAndSubmit(pageA, "线上测试A", "线上A答案");
+  await joinAndSubmit(pageA, "线上测试A", "线上A答案", customQuestions.length);
 
   const roomUrl = pageA.url();
   const roomCode = roomUrl.split("#room/")[1];
   assert(Boolean(roomCode), "Room URL should include a room code.");
 
-  await pageA.waitForFunction(() => document.querySelectorAll(".result-card").length === 100, null, {
+  await pageA.waitForFunction(() => document.querySelectorAll(".result-card").length === 3, null, {
     timeout: 15000
   });
-  assert(await pageA.locator(".result-card").count() === 100, "Results should show 100 question cards.");
-  assert(await pageA.locator(".answer-row").count() === 100, "Player A should initially see one submitted answer per question.");
-  assert(await pageA.getByText("线上自定义问题 23?").count() === 1, "Results should use the custom online room question bank.");
+  assert(await pageA.locator(".result-card").count() === 3, "Results should show the 3 custom question cards.");
+  assert(await pageA.locator(".answer-row").count() === 3, "Player A should initially see one submitted answer per question.");
+  assert(await pageA.getByText("线上自定义问题 3?").count() === 1, "Results should use the shorter custom online room question bank.");
 
   const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const pageB = await contextB.newPage();
   collectPageHealth(pageB, "player-b", health);
 
   await pageB.goto(`${appUrl}#room/${roomCode}`, { waitUntil: "domcontentloaded" });
-  await joinAndSubmit(pageB, "线上测试B", "线上B答案");
+  await joinAndSubmit(pageB, "线上测试B", "线上B答案", customQuestions.length);
 
-  await pageB.waitForFunction(() => document.querySelectorAll(".answer-row").length >= 200, null, {
+  await pageB.waitForFunction(() => document.querySelectorAll(".answer-row").length >= 6, null, {
     timeout: 30000
   });
-  assert(await pageB.locator(".answer-row").count() === 200, "Player B should see both submitted players after submitting.");
-  assert(await pageB.getByText("线上A答案 23").count() === 1, "Player B should see Player A answer 23.");
-  assert(await pageB.getByText("线上B答案 23").count() === 1, "Player B should see Player B answer 23.");
+  assert(await pageB.locator(".answer-row").count() === 6, "Player B should see both submitted players after submitting.");
+  assert(await pageB.getByText("线上A答案 3").count() === 1, "Player B should see Player A answer 3.");
+  assert(await pageB.getByText("线上B答案 3").count() === 1, "Player B should see Player B answer 3.");
 
   await pageA.reload({ waitUntil: "domcontentloaded" });
   await pageA.getByRole("heading", { name: "大家的答案" }).waitFor({ timeout: 30000 });
-  await pageA.waitForFunction(() => document.querySelectorAll(".answer-row").length >= 200, null, {
+  await pageA.waitForFunction(() => document.querySelectorAll(".answer-row").length >= 6, null, {
     timeout: 30000
   });
-  assert(await pageA.locator(".answer-row").count() === 200, "Player A should see Player B after refreshing results.");
+  assert(await pageA.locator(".answer-row").count() === 6, "Player A should see Player B after refreshing results.");
   assert(await pageA.getByText("你的答案已经锁定").count() === 1, "Submitted player should see locked-answer status.");
 
   await pageA.screenshot({ path: resultScreenshot, fullPage: false });
@@ -187,7 +187,7 @@ try {
       resultCards: await pageA.locator(".result-card").count(),
       answerRows: await pageA.locator(".answer-row").count(),
       lockedFields: await pageA.locator("textarea").count() === 0,
-      customQuestion23Visible: await pageA.getByText("线上自定义问题 23?").count() === 1,
+      customQuestion3Visible: await pageA.getByText("线上自定义问题 3?").count() === 1,
       mobileCreateRoomVisible: await mobilePage.getByRole("button", { name: "创建房间" }).isVisible()
     },
     screenshots: {

@@ -1,11 +1,11 @@
 # 100 Q&As
 
-给熟人朋友玩的私密网页问答游戏。每位参与者独立回答 100 个问题，完成提交后才能查看同一房间内其他朋友的答案。
+给熟人朋友玩的私密网页问答游戏。每位参与者独立回答同一房间的一组问题，完成提交后才能查看同一房间内其他朋友的答案。默认题库是 100 题，自定义题库支持 1 到 100 题。
 
 ## 项目文件指引
 
 - 产品需求：[docs/product-requirements.md](docs/product-requirements.md)
-- 100 题题库：[docs/question-bank.md](docs/question-bank.md)
+- 默认 100 题题库：[docs/question-bank.md](docs/question-bank.md)
 - 技术架构：[docs/technical-architecture.md](docs/technical-architecture.md)
 - 设计规范：[docs/design-guidelines.md](docs/design-guidelines.md)
 - 开发执行标准：[docs/development-workflow.md](docs/development-workflow.md)
@@ -39,22 +39,23 @@
 - 已读取并整理用户提供的 `100 Q&As.docx`。
 - 已确认 MVP 需求。
 - 已确定第一版不做账号系统，采用私密房间 + 昵称 + 本地身份密钥。
-- 已确认每页 5 题，共 20 页。
+- 已确认每页 5 题；默认 100 题共 20 页，自定义题库页数按题量变化。
 - 已确认提交后不可修改。
 - 已确认结果页默认按题目查看大家答案。
 - 已修正第 23 题为“现在想吃什么?”。
-- 已支持创建房间时绑定题库：默认题库或自定义 100 题。
+- 已支持创建房间时绑定题库：默认题库或 1 到 100 题的自定义题库。
 - 已支持自定义题库粘贴和 `.txt` / `.md` / `.csv` 纯文本文件上传。
 - 已创建阶段 1 本地交互原型基础文件。
 - 已完成创建房间、加入昵称、分页答题、草稿保存的冒烟验证。
-- 已完成 100 题填满、提交确认、提交锁定、结果页展示的完整自动化验证。
+- 已完成填满当前题库、提交确认、提交锁定、结果页展示的完整自动化验证。
 - 已完成本地多人模拟：可新增/切换本地玩家，展示房间人数和提交人数，并验证未提交玩家不能查看结果。
 - 已加入 Supabase 在线模式配置入口，支持后续部署到 GitHub Pages 后直接多人在线填写。
 - GitHub 仓库已创建：[ROHOOOOO/100-qas](https://github.com/ROHOOOOO/100-qas)
 - GitHub Pages 已发布：[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
 - Supabase 数据库 SQL 已运行。
-- 线上双玩家完整验收已通过：创建房间、加入昵称、填写 100 题、提交锁定、结果页按题展示 2 位玩家答案。
+- 线上双玩家完整验收已通过：创建房间、加入昵称、填写题库、提交锁定、结果页按题展示 2 位玩家答案。
 - 房间级自定义题库 SQL 已运行，线上自定义题库双玩家验收已通过。
+- 最新规则已改为自定义题库 1 到 100 题；线上启用该规则需要运行最新版 `supabase/schema.sql`。
 
 ## 当前上线状态
 

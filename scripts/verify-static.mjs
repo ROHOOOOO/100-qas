@@ -50,6 +50,8 @@ assert(appJs.includes("renderLocalPlayers"), "Local player list renderer must ex
 assert(appJs.includes("getRoomQuestions"), "App must read questions from each room.");
 assert(appJs.includes("parseQuestionText"), "App must support pasted/uploaded question banks.");
 assert(appJs.includes("questionBankProblem"), "App must explain invalid question bank input after clicking create.");
+assert(appJs.includes("QUESTION_MINIMUM"), "App must allow shorter custom question banks with a lower bound.");
+assert(appJs.includes("可以生成房间"), "Question bank status should confirm when a shorter bank can create a room.");
 assert(appJs.includes('data-question-file'), "App must expose a question bank file input.");
 assert(appJs.includes('data-question-bank'), "App must expose a pasted question bank input.");
 assert(!appJs.includes("data-create-submit disabled"), "Custom question bank create button should stay clickable for feedback.");
@@ -67,6 +69,9 @@ assert(supabaseSql.includes("questions jsonb"), "Supabase SQL must store room-le
 assert(supabaseSql.includes("add column if not exists questions"), "Supabase SQL must migrate existing rooms for question banks.");
 assert(supabaseSql.includes("qa_create_room"), "Supabase SQL must define qa_create_room.");
 assert(supabaseSql.includes("p_questions jsonb"), "Supabase SQL create-room function must accept question banks.");
+assert(supabaseSql.includes("between 1 and 100"), "Supabase SQL should return stored room questions for 1 to 100 questions.");
+assert(supabaseSql.includes("Question bank must contain at least 1 question."), "Supabase SQL should reject empty custom question banks.");
+assert(supabaseSql.includes("Question bank can contain at most 100 questions."), "Supabase SQL should keep the 100 question upper bound.");
 assert(supabaseSql.includes("qa_submit_player"), "Supabase SQL must define qa_submit_player.");
 
 console.log("Static verification passed.");
