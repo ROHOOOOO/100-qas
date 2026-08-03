@@ -466,7 +466,7 @@
       '  <section class="hero-copy">',
       '    <p class="eyebrow">Private friends game</p>',
       '    <h1>100 Q&As</h1>',
-      '    <p class="lead">慢慢答完 100 个问题，提交之后再看朋友们的答案。</p>',
+      '    <p class="lead">慢慢答完这组问题，提交之后再看朋友们的答案。</p>',
       '    <div class="home-actions">',
       '      <button class="primary-button" data-action="open-create-room">创建房间</button>',
       '      <form class="join-form" data-action="join-code">',
