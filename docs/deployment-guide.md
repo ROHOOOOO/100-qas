@@ -26,15 +26,16 @@
 
 - GitHub Pages 已发布。
 - `src/config.js` 已切换到 Supabase 在线模式。
-- 已在 Supabase SQL Editor 中运行 `supabase/schema.sql`。
-- 线上双玩家验收已通过。
+- 基础多人答题版已在 Supabase SQL Editor 中运行过 `supabase/schema.sql`。
+- 基础线上双玩家验收已通过。
+- 房间级自定义题库改造后，需要再次运行最新版 `supabase/schema.sql`。
 
 ## 使用流程
 
 上线后，朋友的流程是：
 
 1. 打开网页。
-2. 创建房间或打开你发的房间链接。
+2. 创建房间时选择默认题库或自定义题库，也可以打开你发的房间链接。
 3. 输入昵称。
 4. 分页填写 100 题。
 5. 提交。
@@ -79,6 +80,8 @@ supabase/schema.sql
 - `qa_submit_player`
 
 网页通过这些函数读写数据，不直接开放数据表。
+
+如果后续更新了 `supabase/schema.sql`，可以在 SQL Editor 中再次运行整个文件。该文件会兼容已有表和已有房间。
 
 ### 3. 配置网页
 
@@ -175,7 +178,7 @@ https://yourname.github.io/100-qas/
 /Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-online.mjs
 ```
 
-说明：线上验收会创建测试房间和测试答案，用于确认 GitHub Pages 与 Supabase 的真实连接状态。
+说明：线上验收会创建自定义题库测试房间和测试答案，用于确认 GitHub Pages 与 Supabase 的真实连接状态。
 
 ## 重要限制
 
@@ -185,3 +188,4 @@ https://yourname.github.io/100-qas/
 - 不做注册账号。
 - 用户换浏览器或清除浏览器数据后，可能无法继续原来的草稿。
 - 提交后不能修改。
+- 自定义题库第一版只支持纯文本文件或直接粘贴，不直接解析 Word `.docx`。

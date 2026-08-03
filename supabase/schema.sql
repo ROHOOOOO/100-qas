@@ -4,8 +4,25 @@ create table if not exists public.qa_rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   title text not null default '100 Q&As',
+  questions jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table public.qa_rooms
+add column if not exists questions jsonb not null default '[]'::jsonb;
+
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_constraint
+     where conname = 'qa_rooms_questions_array'
+       and conrelid = 'public.qa_rooms'::regclass
+  ) then
+    alter table public.qa_rooms
+    add constraint qa_rooms_questions_array check (jsonb_typeof(questions) = 'array');
+  end if;
+end $$;
 
 create table if not exists public.qa_players (
   id uuid primary key default gen_random_uuid(),
@@ -77,6 +94,18 @@ begin
       'id', v_room.id,
       'code', v_room.code,
       'title', v_room.title,
+      'questions', case
+        when jsonb_typeof(v_room.questions) = 'array'
+         and jsonb_array_length(v_room.questions) = 100
+        then v_room.questions
+        else null
+      end,
+      'questionCount', case
+        when jsonb_typeof(v_room.questions) = 'array'
+         and jsonb_array_length(v_room.questions) > 0
+        then jsonb_array_length(v_room.questions)
+        else 100
+      end,
       'createdAt', v_room.created_at
     ),
     'currentPlayerId', case when v_has_current then v_current.id else null end,
@@ -128,7 +157,11 @@ begin
 end;
 $$;
 
-create or replace function public.qa_create_room()
+drop function if exists public.qa_create_room();
+
+create or replace function public.qa_create_room(
+  p_questions jsonb default null
+)
 returns jsonb
 language plpgsql
 security definer
@@ -136,14 +169,34 @@ set search_path = public
 as $$
 declare
   v_room public.qa_rooms%rowtype;
+  v_questions jsonb := '[]'::jsonb;
   v_attempts integer := 0;
 begin
+  if p_questions is not null then
+    if jsonb_typeof(p_questions) <> 'array' then
+      raise exception 'Question bank must be an array.';
+    end if;
+
+    select coalesce(
+      jsonb_agg(to_jsonb(left(btrim(question_item.value #>> '{}'), 240)) order by question_item.ordinality),
+      '[]'::jsonb
+    )
+      into v_questions
+      from jsonb_array_elements(p_questions) with ordinality as question_item(value, ordinality)
+     where jsonb_typeof(question_item.value) = 'string'
+       and btrim(question_item.value #>> '{}') <> '';
+
+    if jsonb_array_length(v_questions) <> 100 then
+      raise exception 'Question bank must contain exactly 100 questions.';
+    end if;
+  end if;
+
   loop
     v_attempts := v_attempts + 1;
 
     begin
-      insert into public.qa_rooms (code)
-      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6))
+      insert into public.qa_rooms (code, questions)
+      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6), v_questions)
       returning *
       into v_room;
 
@@ -231,6 +284,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
+  v_required_count integer;
 begin
   select *
     into v_room
@@ -256,6 +310,17 @@ begin
     raise exception 'Submitted answers cannot be changed.';
   end if;
 
+  v_required_count := case
+    when jsonb_typeof(v_room.questions) = 'array'
+     and jsonb_array_length(v_room.questions) > 0
+    then jsonb_array_length(v_room.questions)
+    else 100
+  end;
+
+  if p_question_index < 1 or p_question_index > v_required_count then
+    raise exception 'Question index is outside this room question bank.';
+  end if;
+
   insert into public.qa_answers (room_id, player_id, question_index, content, updated_at)
   values (v_room.id, v_player.id, p_question_index, coalesce(p_content, ''), now())
   on conflict (player_id, question_index)
@@ -279,6 +344,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
+  v_required_count integer;
   v_answer_count integer;
   v_item record;
 begin
@@ -306,10 +372,17 @@ begin
     return public.qa_room_bundle(v_room.code, v_player.id, p_player_key);
   end if;
 
+  v_required_count := case
+    when jsonb_typeof(v_room.questions) = 'array'
+     and jsonb_array_length(v_room.questions) > 0
+    then jsonb_array_length(v_room.questions)
+    else 100
+  end;
+
   if p_answers is not null then
     for v_item in select key, value from jsonb_each_text(p_answers)
     loop
-      if v_item.key ~ '^\d+$' and (v_item.key)::integer between 1 and 100 then
+      if v_item.key ~ '^\d+$' and (v_item.key)::integer between 1 and v_required_count then
         insert into public.qa_answers (room_id, player_id, question_index, content, updated_at)
         values (v_room.id, v_player.id, (v_item.key)::integer, coalesce(v_item.value, ''), now())
         on conflict (player_id, question_index)
@@ -324,8 +397,8 @@ begin
    where player_id = v_player.id
      and btrim(content) <> '';
 
-  if v_answer_count < 100 then
-    raise exception 'All 100 answers are required before submit.';
+  if v_answer_count < v_required_count then
+    raise exception 'All answers are required before submit.';
   end if;
 
   update public.qa_players
@@ -338,7 +411,7 @@ begin
 end;
 $$;
 
-grant execute on function public.qa_create_room() to anon;
+grant execute on function public.qa_create_room(jsonb) to anon;
 grant execute on function public.qa_get_room(text, uuid, text) to anon;
 grant execute on function public.qa_join_room(text, text, text) to anon;
 grant execute on function public.qa_save_answer(text, uuid, text, integer, text) to anon;

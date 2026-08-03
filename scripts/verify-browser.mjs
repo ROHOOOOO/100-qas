@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -28,6 +29,9 @@ function assert(condition, message) {
 
 const { chromium } = loadPlaywright();
 const appUrl = pathToFileURL(join(process.cwd(), "index.html")).href + "?backend=local";
+const customQuestions = Array.from({ length: 100 }, (_, index) => `自定义问题 ${index + 1}?`);
+const customQuestionsPath = join(tmpdir(), "100-qas-custom-questions.txt");
+writeFileSync(customQuestionsPath, customQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n"));
 
 async function launchBrowser() {
   try {
@@ -60,8 +64,15 @@ try {
   await page.goto(appUrl);
 
   await page.getByRole("button", { name: "创建房间" }).click();
+  await page.getByRole("heading", { name: "创建房间" }).waitFor();
+  await page.getByRole("button", { name: "自定义题库" }).click();
+  await page.getByLabel("上传题库文件").setInputFiles(customQuestionsPath);
+  await page.getByText("已识别 100 / 100 题").waitFor();
+  await page.getByRole("button", { name: "生成房间" }).click();
+
   await page.getByLabel("昵称").fill("完整验证玩家");
   await page.getByRole("button", { name: "开始答题" }).click();
+  await page.getByText("自定义问题 1?").waitFor();
 
   for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
     const startNumber = pageIndex * 5 + 1;
@@ -93,6 +104,7 @@ try {
   assert(await page.locator("textarea").count() === 0, "Submitted player should not see editable textareas.");
   assert(await page.locator(".result-card").count() === 100, "Results should show 100 question cards.");
   assert(await page.locator(".answer-row").count() === 100, "One submitted player should produce 100 answer rows.");
+  assert(await page.getByText("自定义问题 23?").count() === 1, "Result page should use the custom room question bank.");
   assert(await page.getByText("测试答案 23").count() === 1, "Result page should include answer 23.");
   assert(await page.getByText("你的答案已经锁定").count() === 1, "Result page should show the locked-answer status.");
 
@@ -134,7 +146,8 @@ try {
       firstAnswerCount: firstPlayer ? Object.keys(firstPlayer.answers).length : 0,
       firstAnswer23: firstPlayer ? firstPlayer.answers["23"] : null,
       secondSubmitted: Boolean(secondPlayer && secondPlayer.submittedAt),
-      secondAnswerCount: secondPlayer ? Object.keys(secondPlayer.answers).length : 0
+      secondAnswerCount: secondPlayer ? Object.keys(secondPlayer.answers).length : 0,
+      question23: room && room.questions ? room.questions[22] : null
     };
   });
 
@@ -143,6 +156,7 @@ try {
   assert(stateSummary.firstSubmitted, "First player should be marked as submitted.");
   assert(stateSummary.firstAnswerCount === 100, "First player should have 100 saved answers.");
   assert(stateSummary.firstAnswer23 === "测试答案 23", "Saved answer 23 should match the filled value.");
+  assert(stateSummary.question23 === "自定义问题 23?", "Room should persist its custom question bank.");
   assert(!stateSummary.secondSubmitted, "Second player should remain unsubmitted.");
   assert(stateSummary.secondAnswerCount === 0, "Second player should have no saved answers in this scenario.");
   assert(consoleErrors.length === 0, `Console should have no errors: ${consoleErrors.join("; ")}`);

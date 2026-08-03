@@ -37,6 +37,7 @@ assert(appJs.includes('params.get("backend") === "local"'), "App must keep the l
 
 assert(!appJs.includes("window.confirm"), "Submission confirmation should use the in-page dialog, not window.confirm.");
 assert(appJs.includes("qa_create_room"), "App must include the Supabase create-room RPC.");
+assert(appJs.includes("p_questions"), "App must send room question banks to Supabase create-room RPC.");
 assert(appJs.includes("qa_join_room"), "App must include the Supabase join-room RPC.");
 assert(appJs.includes("qa_save_answer"), "App must include the Supabase save-answer RPC.");
 assert(appJs.includes("qa_submit_player"), "App must include the Supabase submit-player RPC.");
@@ -46,15 +47,24 @@ assert(appJs.includes("finishSubmitAnswers"), "Final submit handler must exist."
 assert(appJs.includes("submittedAt"), "Submitted state must be represented.");
 assert(appJs.includes("renderRoomSummary"), "Room summary renderer must exist.");
 assert(appJs.includes("renderLocalPlayers"), "Local player list renderer must exist.");
+assert(appJs.includes("getRoomQuestions"), "App must read questions from each room.");
+assert(appJs.includes("parseQuestionText"), "App must support pasted/uploaded question banks.");
+assert(appJs.includes('data-question-file'), "App must expose a question bank file input.");
+assert(appJs.includes('data-question-bank'), "App must expose a pasted question bank input.");
 assert(appJs.includes('data-action="switch-player"'), "Local player switching action must exist.");
 assert(stylesCss.includes(".modal-backdrop"), "Submit dialog backdrop styles must exist.");
 assert(stylesCss.includes(".confirm-dialog"), "Submit dialog styles must exist.");
 assert(stylesCss.includes(".room-summary"), "Room summary styles must exist.");
 assert(stylesCss.includes(".player-row"), "Local player row styles must exist.");
+assert(stylesCss.includes(".segmented-control"), "Question bank segmented control styles must exist.");
+assert(stylesCss.includes(".question-check"), "Question bank validation styles must exist.");
 assert(supabaseSql.includes("create table if not exists public.qa_rooms"), "Supabase SQL must create qa_rooms.");
 assert(supabaseSql.includes("create table if not exists public.qa_players"), "Supabase SQL must create qa_players.");
 assert(supabaseSql.includes("create table if not exists public.qa_answers"), "Supabase SQL must create qa_answers.");
+assert(supabaseSql.includes("questions jsonb"), "Supabase SQL must store room-level question banks.");
+assert(supabaseSql.includes("add column if not exists questions"), "Supabase SQL must migrate existing rooms for question banks.");
 assert(supabaseSql.includes("qa_create_room"), "Supabase SQL must define qa_create_room.");
+assert(supabaseSql.includes("p_questions jsonb"), "Supabase SQL create-room function must accept question banks.");
 assert(supabaseSql.includes("qa_submit_player"), "Supabase SQL must define qa_submit_player.");
 
 console.log("Static verification passed.");

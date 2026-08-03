@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -102,6 +102,9 @@ async function waitForHeroImage(page) {
 
 const { chromium } = loadPlaywright();
 const appUrl = process.env.QA_ONLINE_URL || "https://rohooooo.github.io/100-qas/";
+const customQuestions = Array.from({ length: 100 }, (_, index) => `线上自定义问题 ${index + 1}?`);
+const customQuestionsPath = join(tmpdir(), "100-qas-online-custom-questions.txt");
+writeFileSync(customQuestionsPath, customQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n"));
 const resultScreenshot = join(tmpdir(), "100-qas-online-results.png");
 const mobileScreenshot = join(tmpdir(), "100-qas-online-mobile.png");
 const health = { logs: [] };
@@ -117,6 +120,11 @@ try {
   await waitForHeroImage(pageA);
   await pageA.getByRole("button", { name: "创建房间" }).waitFor({ timeout: 20000 });
   await pageA.getByRole("button", { name: "创建房间" }).click();
+  await pageA.getByRole("heading", { name: "创建房间" }).waitFor({ timeout: 20000 });
+  await pageA.getByRole("button", { name: "自定义题库" }).click();
+  await pageA.getByLabel("上传题库文件").setInputFiles(customQuestionsPath);
+  await pageA.getByText("已识别 100 / 100 题").waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "生成房间" }).click();
 
   await joinAndSubmit(pageA, "线上测试A", "线上A答案");
 
@@ -129,6 +137,7 @@ try {
   });
   assert(await pageA.locator(".result-card").count() === 100, "Results should show 100 question cards.");
   assert(await pageA.locator(".answer-row").count() === 100, "Player A should initially see one submitted answer per question.");
+  assert(await pageA.getByText("线上自定义问题 23?").count() === 1, "Results should use the custom online room question bank.");
 
   const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const pageB = await contextB.newPage();
@@ -176,6 +185,7 @@ try {
       resultCards: await pageA.locator(".result-card").count(),
       answerRows: await pageA.locator(".answer-row").count(),
       lockedFields: await pageA.locator("textarea").count() === 0,
+      customQuestion23Visible: await pageA.getByText("线上自定义问题 23?").count() === 1,
       mobileCreateRoomVisible: await mobilePage.getByRole("button", { name: "创建房间" }).isVisible()
     },
     screenshots: {

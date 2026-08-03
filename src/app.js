@@ -2,10 +2,18 @@
   var STORAGE_KEY = "hundred-qas-state-v1";
   var IDENTITY_KEY = "hundred-qas-current-players-v1";
   var PAGE_SIZE = 5;
-  var questions = window.QA_QUESTIONS || [];
+  var QUESTION_TARGET = 100;
+  var MAX_QUESTION_LENGTH = 240;
+  var MAX_QUESTION_FILE_BYTES = 120 * 1024;
+  var defaultQuestions = window.QA_QUESTIONS || [];
   var app = document.getElementById("app");
   var saveTimer = null;
   var remoteAnswerTimers = {};
+  var createRoomDraft = {
+    mode: "default",
+    rawText: "",
+    questions: defaultQuestions.slice()
+  };
 
   function getConfig() {
     var config = window.QA_CONFIG || {};
@@ -121,6 +129,126 @@
     return code;
   }
 
+  function cleanQuestion(value) {
+    return String(value || "")
+      .replace(/^\uFEFF/, "")
+      .replace(/\s+/g, " ")
+      .replace(/^\s*(?:Q\s*)?\d{1,3}\s*[.、):：-]?\s*/i, "")
+      .trim();
+  }
+
+  function isQuestionHeader(value) {
+    return /^(问题|题目|question|questions)$/i.test(String(value || "").trim());
+  }
+
+  function isNumberish(value) {
+    return /^(?:Q\s*)?\d{1,3}$/i.test(String(value || "").trim());
+  }
+
+  function parseCsvRow(row) {
+    var cells = [];
+    var current = "";
+    var inQuotes = false;
+
+    for (var i = 0; i < row.length; i += 1) {
+      var char = row[i];
+      var next = row[i + 1];
+
+      if (char === '"' && inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        cells.push(current);
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+
+    cells.push(current);
+    return cells;
+  }
+
+  function pickQuestionFromLine(line) {
+    var cells = line.indexOf(",") >= 0 ? parseCsvRow(line) : [line];
+
+    for (var i = 0; i < cells.length; i += 1) {
+      var raw = cells[i].trim();
+      var cleaned = cleanQuestion(raw);
+      if (cleaned && !isNumberish(raw) && !isQuestionHeader(cleaned)) {
+        return cleaned;
+      }
+    }
+
+    return "";
+  }
+
+  function parseQuestionText(rawText) {
+    return String(rawText || "")
+      .split(/\r?\n/)
+      .map(function (line) { return pickQuestionFromLine(line); })
+      .filter(Boolean);
+  }
+
+  function normalizeQuestionArray(value) {
+    if (!Array.isArray(value)) return [];
+
+    return value
+      .map(cleanQuestion)
+      .filter(Boolean);
+  }
+
+  function getRoomQuestions(room) {
+    var roomQuestions = normalizeQuestionArray(room && room.questions);
+    if (roomQuestions.length === QUESTION_TARGET) {
+      return roomQuestions;
+    }
+    return defaultQuestions.slice();
+  }
+
+  function getSelectedCreateQuestions() {
+    if (createRoomDraft.mode === "custom") {
+      return normalizeQuestionArray(createRoomDraft.questions);
+    }
+    return defaultQuestions.slice();
+  }
+
+  function isQuestionBankReady(roomQuestions) {
+    return roomQuestions.length === QUESTION_TARGET && roomQuestions.every(function (question) {
+      return question.length <= MAX_QUESTION_LENGTH;
+    });
+  }
+
+  function questionBankStatus(roomQuestions) {
+    var tooLong = roomQuestions.some(function (question) {
+      return question.length > MAX_QUESTION_LENGTH;
+    });
+
+    if (tooLong) {
+      return "有题目超过 " + MAX_QUESTION_LENGTH + " 字，请缩短后再创建。";
+    }
+
+    if (roomQuestions.length === QUESTION_TARGET) {
+      return "已识别 " + QUESTION_TARGET + " / " + QUESTION_TARGET + " 题";
+    }
+
+    if (roomQuestions.length > QUESTION_TARGET) {
+      return "已识别 " + roomQuestions.length + " 题，请保留 " + QUESTION_TARGET + " 题。";
+    }
+
+    return "已识别 " + roomQuestions.length + " / " + QUESTION_TARGET + " 题";
+  }
+
+  function resetCreateRoomDraft() {
+    createRoomDraft = {
+      mode: "default",
+      rawText: "",
+      questions: defaultQuestions.slice()
+    };
+  }
+
   function getHashParts() {
     var raw = window.location.hash.replace(/^#\/?/, "");
     return raw ? raw.split("/") : ["home"];
@@ -147,8 +275,9 @@
     return room.players[playerId];
   }
 
-  function answeredCount(player) {
-    return questions.reduce(function (count, _, index) {
+  function answeredCount(player, room) {
+    var roomQuestions = getRoomQuestions(room);
+    return roomQuestions.reduce(function (count, _, index) {
       var answer = (player.answers[String(index + 1)] || "").trim();
       return count + (answer ? 1 : 0);
     }, 0);
@@ -188,6 +317,7 @@
       code: bundle.room.code,
       title: bundle.room.title || "100 Q&As",
       createdAt: bundle.room.createdAt || bundle.room.created_at || new Date().toISOString(),
+      questions: getRoomQuestions({ questions: bundle.room.questions || bundle.room.questionBank }),
       players: {}
     };
 
@@ -281,6 +411,11 @@
       return;
     }
 
+    if (pageName === "create") {
+      renderCreateRoom(state);
+      return;
+    }
+
     renderHome(state);
   }
 
@@ -298,7 +433,7 @@
       '    <h1>100 Q&As</h1>',
       '    <p class="lead">慢慢答完 100 个问题，提交之后再看朋友们的答案。</p>',
       '    <div class="home-actions">',
-      '      <button class="primary-button" data-action="create-room">创建房间</button>',
+      '      <button class="primary-button" data-action="open-create-room">创建房间</button>',
       '      <form class="join-form" data-action="join-code">',
       '        <label for="room-code">输入房间码</label>',
       '        <div class="inline-form">',
@@ -311,6 +446,53 @@
       '  </section>',
       '  <section class="hero-visual" aria-label="100 Q&As visual">',
       '    <img src="assets/question-tabletop.png" alt="">',
+      '  </section>',
+      '</main>'
+    ].join("");
+  }
+
+  function renderCreateRoom() {
+    var selectedQuestions = getSelectedCreateQuestions();
+    var isDefault = createRoomDraft.mode === "default";
+    var isReady = isQuestionBankReady(selectedQuestions);
+    var previewQuestions = selectedQuestions.slice(0, 3);
+
+    app.innerHTML = [
+      '<main class="narrow-layout">',
+      '  <section class="panel create-panel">',
+      '    <p class="eyebrow">New room</p>',
+      '    <h1>创建房间</h1>',
+      '    <form class="stack-form" data-action="create-room">',
+      '      <fieldset class="question-source">',
+      '        <legend>题库</legend>',
+      '        <div class="segmented-control" role="group" aria-label="题库来源">',
+      '          <button type="button" class="' + (isDefault ? "is-active" : "") + '" data-action="set-question-mode" data-mode="default">默认 100 题</button>',
+      '          <button type="button" class="' + (!isDefault ? "is-active" : "") + '" data-action="set-question-mode" data-mode="custom">自定义题库</button>',
+      '        </div>',
+      '      </fieldset>',
+      isDefault ? "" : [
+      '      <section class="question-builder">',
+      '        <label for="question-file">上传题库文件</label>',
+      '        <input class="file-input" id="question-file" type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv" data-question-file>',
+      '        <label for="question-bank">粘贴题目</label>',
+      '        <textarea id="question-bank" data-question-bank rows="9" placeholder="1. 晴天 or 雨天?&#10;2. 此时此刻在哪里?">' + escapeHtml(createRoomDraft.rawText) + '</textarea>',
+      '      </section>'
+      ].join(""),
+      '      <section class="question-check">',
+      '        <strong data-question-count>' + escapeHtml(questionBankStatus(selectedQuestions)) + '</strong>',
+      previewQuestions.length ? [
+      '        <ol data-question-preview>',
+      previewQuestions.map(function (question) {
+        return '          <li>' + escapeHtml(question) + '</li>';
+      }).join(""),
+      '        </ol>'
+      ].join("") : '        <ol data-question-preview></ol>',
+      '      </section>',
+      '      <div class="dialog-actions">',
+      '        <button type="button" class="secondary-button" data-action="go-home">返回</button>',
+      '        <button class="primary-button" type="submit" data-create-submit ' + (isReady ? "" : "disabled") + '>生成房间</button>',
+      '      </div>',
+      '    </form>',
       '  </section>',
       '</main>'
     ].join("");
@@ -390,11 +572,12 @@
   }
 
   function renderAnswerPage(room, player) {
-    var page = Math.min(Math.max(getCurrentPage(room, player), 0), Math.ceil(questions.length / PAGE_SIZE) - 1);
+    var roomQuestions = getRoomQuestions(room);
+    var page = Math.min(Math.max(getCurrentPage(room, player), 0), Math.ceil(roomQuestions.length / PAGE_SIZE) - 1);
     var start = page * PAGE_SIZE;
-    var pageQuestions = questions.slice(start, start + PAGE_SIZE);
-    var done = answeredCount(player);
-    var canSubmit = done === questions.length;
+    var pageQuestions = roomQuestions.slice(start, start + PAGE_SIZE);
+    var done = answeredCount(player, room);
+    var canSubmit = done === roomQuestions.length;
 
     app.innerHTML = [
       '<main class="answer-layout">',
@@ -415,23 +598,24 @@
       '  </section>',
       '  <nav class="pager" aria-label="答题分页">',
       '    <button class="secondary-button" data-action="prev-page" ' + (page === 0 ? "disabled" : "") + '>上一页</button>',
-      '    <span>第 ' + (page + 1) + ' / ' + Math.ceil(questions.length / PAGE_SIZE) + ' 页</span>',
-      page === Math.ceil(questions.length / PAGE_SIZE) - 1
+      '    <span>第 ' + (page + 1) + ' / ' + Math.ceil(roomQuestions.length / PAGE_SIZE) + ' 页</span>',
+      page === Math.ceil(roomQuestions.length / PAGE_SIZE) - 1
         ? '<button class="primary-button" data-action="submit-answers" ' + (canSubmit ? "" : "disabled") + '>提交答案</button>'
         : '<button class="primary-button" data-action="next-page">下一页</button>',
       '  </nav>',
-      canSubmit ? "" : '<p class="submit-hint">还差 ' + (questions.length - done) + ' 题就可以提交。</p>',
+      canSubmit ? "" : '<p class="submit-hint">还差 ' + (roomQuestions.length - done) + ' 题就可以提交。</p>',
       '</main>'
     ].join("");
   }
 
   function renderRoomHeader(room, player, done) {
-    var progress = Math.round((done / questions.length) * 100);
+    var roomQuestions = getRoomQuestions(room);
+    var progress = Math.round((done / roomQuestions.length) * 100);
     return [
       '<header class="room-header">',
       '  <div>',
       '    <p class="eyebrow">Room ' + escapeHtml(room.code) + '</p>',
-      '    <h1>' + escapeHtml(player.nickname) + ' 的 100 Q&As</h1>',
+      '    <h1>' + escapeHtml(player.nickname) + ' 的 ' + roomQuestions.length + ' Q&As</h1>',
       '  </div>',
       '  <div class="room-tools">',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-link">↗</button>',
@@ -439,7 +623,7 @@
       '  </div>',
       '  <div class="progress-wrap" aria-label="答题进度">',
       '    <div class="progress-track"><div class="progress-bar" style="width:' + progress + '%"></div></div>',
-      '    <span>' + done + ' / ' + questions.length + ' 已回答</span>',
+      '    <span>' + done + ' / ' + roomQuestions.length + ' 已回答</span>',
       '  </div>',
       '  <p class="save-status" id="save-status">草稿会自动保存</p>',
       '</header>'
@@ -448,11 +632,13 @@
 
   function renderRoomSummary(room, currentPlayer) {
     var players = getRoomPlayers(room);
+    var roomQuestions = getRoomQuestions(room);
     return [
       '<section class="room-summary" aria-label="房间进度">',
       '  <div class="summary-stats">',
       '    <div><span>加入</span><strong>' + players.length + ' 人</strong></div>',
       '    <div><span>提交</span><strong>' + submittedCount(room) + ' 人</strong></div>',
+      '    <div><span>题库</span><strong>' + roomQuestions.length + ' 题</strong></div>',
       '    <div><span>房间码</span><strong>' + escapeHtml(room.code) + '</strong></div>',
       '  </div>',
       renderLocalPlayers(room, currentPlayer),
@@ -462,6 +648,7 @@
 
   function renderLocalPlayers(room, currentPlayer) {
     var players = getRoomPlayers(room);
+    var roomQuestions = getRoomQuestions(room);
     if (!players.length) return "";
 
     return [
@@ -470,8 +657,8 @@
       '  <div class="player-list">',
       players.map(function (player) {
         var isCurrent = currentPlayer && player.id === currentPlayer.id;
-        var done = answeredCount(player);
-        var status = player.submittedAt ? "已提交" : "已答 " + done + "/" + questions.length;
+        var done = answeredCount(player, room);
+        var status = player.submittedAt ? "已提交" : "已答 " + done + "/" + roomQuestions.length;
         return [
           '<div class="player-row' + (isCurrent ? " is-current" : "") + '">',
           '  <div>',
@@ -492,6 +679,7 @@
   }
 
   function renderResults(room, player) {
+    var roomQuestions = getRoomQuestions(room);
     var submittedPlayers = Object.keys(room.players)
       .map(function (id) { return room.players[id]; })
       .filter(function (item) { return Boolean(item.submittedAt); });
@@ -511,7 +699,7 @@
       '  </header>',
       renderRoomSummary(room, player),
       '  <section class="result-list">',
-      questions.map(function (question, index) {
+      roomQuestions.map(function (question, index) {
         var number = index + 1;
         return [
           '<article class="result-card">',
@@ -536,16 +724,36 @@
     ].join("");
   }
 
-  async function createRoom() {
+  async function createRoom(roomQuestions) {
+    var selectedQuestions = normalizeQuestionArray(roomQuestions);
+    var isCustom = createRoomDraft.mode === "custom";
+
+    if (!isQuestionBankReady(selectedQuestions)) {
+      showToast("题库需要正好 " + QUESTION_TARGET + " 题。");
+      return;
+    }
+
     if (isSupabaseMode()) {
       try {
-        var bundle = await supabaseRpc("qa_create_room", {});
+        var payload = { p_questions: selectedQuestions };
+        var bundle;
+
+        try {
+          bundle = await supabaseRpc("qa_create_room", payload);
+        } catch (error) {
+          if (isCustom) {
+            throw error;
+          }
+          bundle = await supabaseRpc("qa_create_room", {});
+        }
+
         var onlineRoom = normalizeOnlineRoom(bundle);
         if (!onlineRoom) throw new Error("Room was not created.");
         cacheRoom(onlineRoom);
+        resetCreateRoomDraft();
         setRoute("room/" + onlineRoom.code);
       } catch (error) {
-        showToast("线上房间创建失败，请检查 Supabase 配置。");
+        showToast(isCustom ? "自定义题库需要先升级 Supabase SQL。" : "线上房间创建失败，请检查 Supabase 配置。");
       }
       return;
     }
@@ -561,12 +769,77 @@
       code: code,
       title: "100 Q&As",
       createdAt: new Date().toISOString(),
+      questions: selectedQuestions.slice(),
       players: {}
     };
 
     state.rooms[room.id] = room;
     saveState(state);
+    resetCreateRoomDraft();
     setRoute("room/" + room.code);
+  }
+
+  function submitCreateRoom() {
+    createRoom(getSelectedCreateQuestions());
+  }
+
+  function setQuestionMode(mode) {
+    createRoomDraft.mode = mode === "custom" ? "custom" : "default";
+    if (createRoomDraft.mode === "default") {
+      createRoomDraft.questions = defaultQuestions.slice();
+    } else {
+      createRoomDraft.questions = parseQuestionText(createRoomDraft.rawText);
+    }
+    renderCreateRoom();
+  }
+
+  function updateCreateQuestionDraft(rawText) {
+    createRoomDraft.rawText = rawText;
+    createRoomDraft.questions = parseQuestionText(rawText);
+    renderCreateQuestionStatus();
+  }
+
+  function renderCreateQuestionStatus() {
+    var selectedQuestions = getSelectedCreateQuestions();
+    var count = document.querySelector("[data-question-count]");
+    var preview = document.querySelector("[data-question-preview]");
+    var submit = document.querySelector("[data-create-submit]");
+
+    if (count) {
+      count.textContent = questionBankStatus(selectedQuestions);
+    }
+
+    if (preview) {
+      preview.innerHTML = selectedQuestions.slice(0, 3).map(function (question) {
+        return "<li>" + escapeHtml(question) + "</li>";
+      }).join("");
+    }
+
+    if (submit) {
+      submit.disabled = !isQuestionBankReady(selectedQuestions);
+    }
+  }
+
+  function loadQuestionFile(file) {
+    if (!file) return;
+
+    if (file.size > MAX_QUESTION_FILE_BYTES) {
+      showToast("题库文件太大，请换成纯文本题库。");
+      return;
+    }
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      createRoomDraft.mode = "custom";
+      updateCreateQuestionDraft(String(reader.result || ""));
+      var textarea = document.querySelector("[data-question-bank]");
+      if (textarea) textarea.value = createRoomDraft.rawText;
+      showToast("题库文件已读取");
+    };
+    reader.onerror = function () {
+      showToast("题库文件读取失败，请直接粘贴题目。");
+    };
+    reader.readAsText(file);
   }
 
   async function joinRoom(roomId, nickname) {
@@ -663,18 +936,19 @@
     var state = loadState();
     var room = state.rooms[roomId];
     if (!room || !room.players[playerId]) return;
-    var done = answeredCount(room.players[playerId]);
-    var progress = Math.round((done / questions.length) * 100);
+    var roomQuestions = getRoomQuestions(room);
+    var done = answeredCount(room.players[playerId], room);
+    var progress = Math.round((done / roomQuestions.length) * 100);
     var bar = document.querySelector(".progress-bar");
     var label = document.querySelector(".progress-wrap span");
     var hint = document.querySelector(".submit-hint");
     var submit = document.querySelector('[data-action="submit-answers"]');
     var playerStatus = document.querySelector('[data-player-status="' + playerId + '"]');
     if (bar) bar.style.width = progress + "%";
-    if (label) label.textContent = done + " / " + questions.length + " 已回答";
-    if (hint) hint.textContent = done === questions.length ? "" : "还差 " + (questions.length - done) + " 题就可以提交。";
-    if (submit) submit.disabled = done !== questions.length;
-    if (playerStatus) playerStatus.textContent = "已答 " + done + "/" + questions.length;
+    if (label) label.textContent = done + " / " + roomQuestions.length + " 已回答";
+    if (hint) hint.textContent = done === roomQuestions.length ? "" : "还差 " + (roomQuestions.length - done) + " 题就可以提交。";
+    if (submit) submit.disabled = done !== roomQuestions.length;
+    if (playerStatus) playerStatus.textContent = "已答 " + done + "/" + roomQuestions.length;
   }
 
   function changePage(delta) {
@@ -685,7 +959,7 @@
     var player = getCurrentPlayer(room);
     if (!player) return;
 
-    var maxPage = Math.ceil(questions.length / PAGE_SIZE) - 1;
+    var maxPage = Math.ceil(getRoomQuestions(room).length / PAGE_SIZE) - 1;
     var page = Math.min(Math.max(getCurrentPage(room, player) + delta, 0), maxPage);
     setCurrentPage(room, player, page);
     saveState(state);
@@ -700,13 +974,14 @@
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player) return;
+    var roomQuestions = getRoomQuestions(room);
 
-    if (answeredCount(player) !== questions.length) {
+    if (answeredCount(player, room) !== roomQuestions.length) {
       renderProgressOnly(room.id, player.id);
       return;
     }
 
-    showSubmitConfirm(player);
+    showSubmitConfirm(room, player);
   }
 
   async function finishSubmitAnswers() {
@@ -716,8 +991,9 @@
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player || player.submittedAt) return;
+    var roomQuestions = getRoomQuestions(room);
 
-    if (answeredCount(player) !== questions.length) {
+    if (answeredCount(player, room) !== roomQuestions.length) {
       closeSubmitConfirm();
       renderProgressOnly(room.id, player.id);
       return;
@@ -755,8 +1031,9 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function showSubmitConfirm(player) {
+  function showSubmitConfirm(room, player) {
     closeSubmitConfirm();
+    var total = getRoomQuestions(room).length;
 
     var overlay = document.createElement("div");
     overlay.className = "modal-backdrop";
@@ -765,7 +1042,7 @@
       '<section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="submit-title">',
       '  <p class="eyebrow">Submit answers</p>',
       '  <h2 id="submit-title">确认提交吗?</h2>',
-      '  <p>提交后，' + escapeHtml(player.nickname) + ' 的 100 个答案就会锁定，不能再修改。提交完成后可以查看同一房间里已提交朋友的答案。</p>',
+      '  <p>提交后，' + escapeHtml(player.nickname) + ' 的 ' + total + ' 个答案就会锁定，不能再修改。提交完成后可以查看同一房间里已提交朋友的答案。</p>',
       '  <div class="dialog-actions">',
       '    <button class="secondary-button" data-action="cancel-submit">再检查一下</button>',
       '    <button class="primary-button" data-action="confirm-submit">确认提交</button>',
@@ -843,10 +1120,11 @@
 
   document.addEventListener("click", function (event) {
     var target = event.target.closest("[data-action]");
-    if (!target) return;
+    if (!target || target.tagName === "FORM") return;
 
     var action = target.getAttribute("data-action");
-    if (action === "create-room") createRoom();
+    if (action === "open-create-room") setRoute("create");
+    if (action === "set-question-mode") setQuestionMode(target.getAttribute("data-mode"));
     if (action === "go-home") setRoute("home");
     if (action === "open-room") setRoute("room/" + target.getAttribute("data-code"));
     if (action === "prev-page") changePage(-1);
@@ -880,11 +1158,25 @@
       var nickname = String(new FormData(form).get("nickname") || "");
       joinRoom(roomId, nickname);
     }
+
+    if (action === "create-room") {
+      submitCreateRoom();
+    }
   });
 
   document.addEventListener("input", function (event) {
-    if (!event.target.matches("textarea[data-question]")) return;
-    updateAnswer(event.target.getAttribute("data-question"), event.target.value);
+    if (event.target.matches("textarea[data-question]")) {
+      updateAnswer(event.target.getAttribute("data-question"), event.target.value);
+    }
+
+    if (event.target.matches("[data-question-bank]")) {
+      updateCreateQuestionDraft(event.target.value);
+    }
+  });
+
+  document.addEventListener("change", function (event) {
+    if (!event.target.matches("[data-question-file]")) return;
+    loadQuestionFile(event.target.files && event.target.files[0]);
   });
 
   window.addEventListener("hashchange", render);
