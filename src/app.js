@@ -920,6 +920,13 @@
     var key = room.code + ":" + player.id + ":" + questionNumber;
     window.clearTimeout(remoteAnswerTimers[key]);
     remoteAnswerTimers[key] = window.setTimeout(function () {
+      delete remoteAnswerTimers[key];
+
+      var latestState = loadState();
+      var latestRoom = getRoomByCode(latestState, room.code);
+      var latestPlayer = latestRoom && latestRoom.players[player.id];
+      if (!latestPlayer || latestPlayer.submittedAt) return;
+
       supabaseRpc("qa_save_answer", {
         p_room_code: room.code,
         p_player_id: player.id,
@@ -930,6 +937,18 @@
         showToast("这题暂时没有同步成功，稍后会在提交时再保存。");
       });
     }, 500);
+  }
+
+  function clearOnlineAnswerTimers(room, player) {
+    if (!room || !player) return;
+
+    var prefix = room.code + ":" + player.id + ":";
+    Object.keys(remoteAnswerTimers).forEach(function (key) {
+      if (key.indexOf(prefix) === 0) {
+        window.clearTimeout(remoteAnswerTimers[key]);
+        delete remoteAnswerTimers[key];
+      }
+    });
   }
 
   function renderProgressOnly(roomId, playerId) {
@@ -1007,6 +1026,7 @@
       }
 
       try {
+        clearOnlineAnswerTimers(room, player);
         var bundle = await supabaseRpc("qa_submit_player", {
           p_room_code: room.code,
           p_player_id: player.id,
