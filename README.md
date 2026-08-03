@@ -34,7 +34,7 @@
 
 ## 当前状态
 
-截至 2026-08-03：
+截至 2026-08-04：
 
 - 已读取并整理用户提供的 `100 Q&As.docx`。
 - 已确认 MVP 需求。
@@ -50,20 +50,19 @@
 - 已加入 Supabase 在线模式配置入口，支持后续部署到 GitHub Pages 后直接多人在线填写。
 - GitHub 仓库已创建：[ROHOOOOO/100-qas](https://github.com/ROHOOOOO/100-qas)
 - GitHub Pages 已发布：[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
+- Supabase 数据库 SQL 已运行。
+- 线上双玩家完整验收已通过：创建房间、加入昵称、填写 100 题、提交锁定、结果页按题展示 2 位玩家答案。
 
 ## 当前上线状态
 
-网页已经上线，但 Supabase 数据库函数还未创建。请在 Supabase 的 SQL Editor 中运行：
+网页已经上线，并已接入 Supabase。可以直接把下面的链接发给朋友使用：
 
-```text
-supabase/schema.sql
-```
-
-运行完成后，线上网页就可以创建房间、邀请朋友、填写、提交和查看结果。
+[https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
 
 ## 验证命令
 
 ```bash
 /Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-static.mjs
 /Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-browser.mjs
+/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-online.mjs
 ```

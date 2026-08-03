@@ -26,7 +26,8 @@
 
 - GitHub Pages 已发布。
 - `src/config.js` 已切换到 Supabase 在线模式。
-- 仍需在 Supabase SQL Editor 中运行 `supabase/schema.sql`。
+- 已在 Supabase SQL Editor 中运行 `supabase/schema.sql`。
+- 线上双玩家验收已通过。
 
 ## 使用流程
 
@@ -167,6 +168,14 @@ https://yourname.github.io/100-qas/
 ```bash
 /Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-browser.mjs
 ```
+
+线上环境验收运行：
+
+```bash
+/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-online.mjs
+```
+
+说明：线上验收会创建测试房间和测试答案，用于确认 GitHub Pages 与 Supabase 的真实连接状态。
 
 ## 重要限制
 
