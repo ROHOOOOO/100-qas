@@ -108,6 +108,9 @@ try {
   await page.getByText("已结束").first().waitFor();
   await page.getByText("最终结果").waitFor();
   assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Bankrupt Tycoon player should not see the exit button again.");
+  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await page.getByText("胜利者：Tycoon房主").waitFor();
+  assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Finished Tycoon winner should not see the exit button.");
   await page.screenshot({ path: tycoonRoomScreenshot, fullPage: false });
 
   const tycoonStateSummary = await page.evaluate(() => {
