@@ -1432,6 +1432,10 @@ begin
     raise exception 'Player not found.';
   end if;
 
+  if v_room.status not in ('lobby', 'active') then
+    raise exception 'Cannot exit this room now.';
+  end if;
+
   v_was_current := v_room.current_player_id = v_player.id;
   perform public.tycoon_bankrupt_player(v_room.id, v_player.id, '玩家主动退出。');
 
