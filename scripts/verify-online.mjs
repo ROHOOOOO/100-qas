@@ -101,9 +101,96 @@ async function waitForHeroImage(page) {
   }, null, { timeout: 20000 });
 }
 
+async function waitForBankruptBadge(page) {
+  await page.waitForFunction(() => {
+    return Array.from(document.querySelectorAll(".small-status")).some((element) => {
+      return element.textContent && element.textContent.trim() === "已破产";
+    });
+  }, null, { timeout: 30000 });
+}
+
+async function verifyOnlineTycoon(pageA, browser) {
+  await pageA.goto(`${appBaseUrl}#tycoon`, { waitUntil: "domcontentloaded" });
+  await pageA.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 20000 });
+  await pageA.getByText("32 格世界旅行").waitFor({ timeout: 15000 });
+  await pageA.getByText("退出即破产，其他人继续").waitFor({ timeout: 15000 });
+  await pageA.locator("#tycoon-host-nickname").fill("线上大富翁A");
+  await pageA.getByRole("button", { name: "创建 Friends Tycoon 房间" }).click();
+  await pageA.waitForURL(/#tycoon\/room\//, { timeout: 30000 });
+  await pageA.getByText("至少 2 人开始").waitFor({ timeout: 20000 });
+
+  const roomUrl = pageA.url();
+  const roomCode = roomUrl.split("#tycoon/room/")[1];
+  assert(Boolean(roomCode), "Tycoon room URL should include a room code.");
+
+  const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const pageB = await contextB.newPage();
+  collectPageHealth(pageB, "tycoon-player-b", health);
+  await pageB.goto(`${appBaseUrl}#tycoon/room/${roomCode}`, { waitUntil: "domcontentloaded" });
+  await pageB.getByRole("heading", { name: "加入这局 Friends Tycoon" }).waitFor({ timeout: 30000 });
+  await pageB.locator(".inline-join-form input[name=\"nickname\"]").fill("线上大富翁B");
+  await pageB.locator(".inline-join-form button").click();
+  await pageB.locator(".tycoon-player-list").getByText("线上大富翁B").waitFor({ timeout: 30000 });
+  await pageB.locator(".tycoon-chat-form input[name=\"message\"]").fill("线上准备好了");
+  await pageB.locator(".tycoon-chat-form button").click();
+  await pageB.getByText("线上准备好了").waitFor({ timeout: 20000 });
+
+  await pageA.reload({ waitUntil: "domcontentloaded" });
+  await pageA.locator(".tycoon-player-list").getByText("线上大富翁B").waitFor({ timeout: 30000 });
+  await pageA.getByText("线上准备好了").waitFor({ timeout: 30000 });
+  await pageA.getByRole("button", { name: "开始游戏" }).click();
+  await pageA.getByText("游戏中 · 第 1 回合").first().waitFor({ timeout: 30000 });
+
+  const rollButton = pageA.getByRole("button", { name: "掷骰子" });
+  assert(await rollButton.isEnabled(), "Host should be able to roll on the first Tycoon turn.");
+  await rollButton.click();
+  await pageA.locator(".dice-result").waitFor({ timeout: 30000 });
+
+  const endTurnButton = pageA.getByRole("button", { name: "结束回合" });
+  assert(await endTurnButton.isEnabled(), "Host should be able to end the turn after rolling.");
+  await endTurnButton.click();
+  await pageA.getByRole("heading", { name: "线上大富翁B 的回合" }).waitFor({ timeout: 30000 });
+
+  await pageB.reload({ waitUntil: "domcontentloaded" });
+  await pageB.getByRole("heading", { name: "线上大富翁B 的回合" }).waitFor({ timeout: 30000 });
+  await pageB.getByRole("button", { name: "退出游戏" }).click();
+  await pageB.getByRole("heading", { name: "确认退出吗?" }).waitFor({ timeout: 15000 });
+  await pageB.getByRole("button", { name: "确认退出" }).click();
+  await pageB.getByText("已结束").first().waitFor({ timeout: 30000 });
+  await waitForBankruptBadge(pageB);
+  await pageB.getByText("最终结果").waitFor({ timeout: 30000 });
+  await pageB.getByText("胜利者：线上大富翁A").waitFor({ timeout: 30000 });
+  assert(await pageB.getByRole("button", { name: "退出游戏" }).count() === 0, "Bankrupt online Tycoon player should not see the exit button.");
+  assert(await pageB.locator(".tycoon-message").count() === 0, "Finished Tycoon room should clear chat messages.");
+
+  const recoveredPageB = await contextB.newPage();
+  collectPageHealth(recoveredPageB, "tycoon-player-b-recovered", health);
+  await recoveredPageB.goto(`${appBaseUrl}#tycoon/room/${roomCode}`, { waitUntil: "domcontentloaded" });
+  await recoveredPageB.getByText("已结束").first().waitFor({ timeout: 30000 });
+  await waitForBankruptBadge(recoveredPageB);
+  await recoveredPageB.getByText("最终结果").waitFor({ timeout: 30000 });
+  assert(await recoveredPageB.getByRole("button", { name: "退出游戏" }).count() === 0, "Recovered bankrupt online Tycoon player should remain bankrupt.");
+
+  await pageA.reload({ waitUntil: "domcontentloaded" });
+  await pageA.getByText("已结束").first().waitFor({ timeout: 30000 });
+  await pageA.getByText("胜利者：线上大富翁A").waitFor({ timeout: 30000 });
+  assert(await pageA.getByRole("button", { name: "退出游戏" }).count() === 0, "Finished online Tycoon winner should not see the exit button.");
+  await pageA.screenshot({ path: tycoonScreenshot, fullPage: false });
+
+  return {
+    roomCode,
+    statusVisible: await pageA.getByText("已结束").first().isVisible(),
+    finalWinnerVisible: await pageA.getByText("胜利者：线上大富翁A").isVisible(),
+    bankruptRecovered: await recoveredPageB.locator(".small-status").filter({ hasText: "已破产" }).count() > 0,
+    chatCleared: await pageA.locator(".tycoon-message").count() === 0
+  };
+}
+
 const { chromium } = loadPlaywright();
 const appUrl = process.env.QA_ONLINE_URL || "https://rohooooo.github.io/100-qas/";
+const appBaseUrl = appUrl.split("#")[0];
 const customQuestions = Array.from({ length: 3 }, (_, index) => `线上自定义问题 ${index + 1}?`);
+const tycoonScreenshot = join(tmpdir(), "friends-tycoon-online-room.png");
 const resultScreenshot = join(tmpdir(), "100-qas-online-results.png");
 const mobileScreenshot = join(tmpdir(), "100-qas-online-mobile.png");
 const health = { logs: [] };
@@ -117,12 +204,10 @@ try {
   await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
   assert((await pageA.title()).includes("Friends Games"), "Production page title should identify Friends Games.");
   await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
-  await pageA.getByRole("button", { name: "进入 Friends Tycoon" }).click();
-  await pageA.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 20000 });
-  await pageA.getByText("32 格世界旅行").waitFor({ timeout: 15000 });
-  await pageA.getByText("退出即破产，其他人继续").waitFor({ timeout: 15000 });
-  await pageA.getByRole("button", { name: "创建 Friends Tycoon 房间" }).waitFor({ timeout: 15000 });
-  await pageA.getByRole("button", { name: "游戏大厅" }).click();
+
+  const tycoonChecks = await verifyOnlineTycoon(pageA, browser);
+
+  await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
   await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
 
   await pageA.getByRole("button", { name: "进入 100 Q&As" }).click();
@@ -194,6 +279,7 @@ try {
     ok: true,
     appUrl,
     roomCode,
+    tycoon: tycoonChecks,
     checks: {
       title: await pageA.title(),
       resultCards: await pageA.locator(".result-card").count(),
@@ -205,6 +291,7 @@ try {
       mobileTycoonEntryVisible: await mobilePage.getByRole("button", { name: "进入 Friends Tycoon" }).isVisible()
     },
     screenshots: {
+      tycoon: tycoonScreenshot,
       results: resultScreenshot,
       mobile: mobileScreenshot
     }
