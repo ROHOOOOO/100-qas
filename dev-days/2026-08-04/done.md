@@ -49,3 +49,7 @@
 - 实现 Friends Tycoon 游戏结束处理：保留最终结果和游戏记录，清空聊天；最后幸存模式下已破产玩家不会因现金较高成为赢家。
 - 更新 `supabase/schema.sql`，新增 `tycoon_rooms`、`tycoon_players`、`tycoon_properties`、`tycoon_logs`、`tycoon_messages` 和 Tycoon RPC。
 - 本地自动化验收通过：测试房间 `HDFW72` 跑通 2 人加入、房主开始、掷骰、结束回合、退出即破产、刷新恢复、最终赢家和聊天结束清空。
+- 已提交并发布 Friends Tycoon 本地可玩 MVP，GitHub `main` 最新提交为 `6401d3b Add Friends Tycoon playable MVP`。
+- 手动触发 GitHub Pages 重新构建，确认线上页面已构建到提交 `6401d3b`。
+- 线上冒烟验收通过：`scripts/verify-online.mjs` 确认 `Friends Games`、`100 Q&As`、`Friends Tycoon` 导航和移动端入口可见。
+- 线上 100 Q&As 回归通过：测试房间 `ECA783` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，提交后锁定。
