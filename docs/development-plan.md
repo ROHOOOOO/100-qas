@@ -169,7 +169,7 @@
 
 ## 阶段 7：Friends Tycoon MVP
 
-状态：本地 MVP 已完成，线上 SQL 待运行后验收。
+状态：本地 MVP 已完成，前端已发布，线上 SQL 待运行后验收。
 
 目标：
 
@@ -187,9 +187,11 @@
 5. 已完成：加入破产出局、主动退出即破产和两种胜利条件。
 6. 已完成：加入聊天区和游戏记录区，游戏结束后清空聊天、保留最终结果。
 7. 已完成：前端接入 Supabase RPC 名称，并在 `supabase/schema.sql` 中加入 `tycoon_*` 表和函数。
-8. 待完成：用户在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`。
-9. 待完成：运行 Friends Tycoon 线上双玩家验收，再扩展到 6 人边界测试。
+8. 已完成：发布 GitHub Pages 到提交 `6401d3b`，线上可见 `Friends Tycoon` 入口和创建/加入表单。
+9. 待完成：用户在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`。
+10. 待完成：运行 Friends Tycoon 线上双玩家验收，再扩展到 6 人边界测试。
 
 当前本地验收：
 
 - 本地测试房间 `HDFW72` 跑通：2 人加入、房主开始、掷骰、结束回合、第二位玩家退出、退出者变破产、刷新后状态恢复、最后幸存者获胜。
+- 线上冒烟测试已通过：确认 `Friends Games` 和 `Friends Tycoon` 入口可见，同时回归 100 Q&As 线上 3 题双玩家流程。
