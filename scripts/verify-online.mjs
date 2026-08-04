@@ -117,11 +117,12 @@ try {
   await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
   assert((await pageA.title()).includes("Friends Games"), "Production page title should identify Friends Games.");
   await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
-  await pageA.getByRole("button", { name: "查看规则" }).click();
+  await pageA.getByRole("button", { name: "进入 Friends Tycoon" }).click();
   await pageA.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 20000 });
   await pageA.getByText("32 格世界旅行").waitFor({ timeout: 15000 });
-  await pageA.getByText("最多升级 4 级").waitFor({ timeout: 15000 });
-  await pageA.getByRole("button", { name: "返回大厅" }).click();
+  await pageA.getByText("退出即破产，其他人继续").waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "创建 Friends Tycoon 房间" }).waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "游戏大厅" }).click();
   await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
 
   await pageA.getByRole("button", { name: "进入 100 Q&As" }).click();
@@ -181,6 +182,7 @@ try {
   await mobilePage.goto(appUrl, { waitUntil: "domcontentloaded" });
   await mobilePage.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
   await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).waitFor({ timeout: 20000 });
+  await mobilePage.getByRole("button", { name: "进入 Friends Tycoon" }).waitFor({ timeout: 20000 });
   await mobilePage.screenshot({ path: mobileScreenshot, fullPage: false });
 
   const relevantLogs = health.logs.filter((entry) => {
@@ -199,7 +201,8 @@ try {
       lockedFields: await pageA.locator("textarea").count() === 0,
       customQuestion3Visible: await pageA.getByText("线上自定义问题 3?").count() === 1,
       mobileLobbyVisible: await mobilePage.getByRole("heading", { name: "Friends Games" }).isVisible(),
-      mobileQaEntryVisible: await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).isVisible()
+      mobileQaEntryVisible: await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).isVisible(),
+      mobileTycoonEntryVisible: await mobilePage.getByRole("button", { name: "进入 Friends Tycoon" }).isVisible()
     },
     screenshots: {
       results: resultScreenshot,

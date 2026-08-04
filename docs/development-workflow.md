@@ -77,6 +77,7 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 - 第 23 题为“现在想吃什么?”。
 - 入口文件引用正确。
 - Friends Games 大厅、游戏导航和 Friends Tycoon 入口存在。
+- Friends Tycoon 路由、房间操作、破产逻辑、4 级升级上限和 Supabase SQL 函数存在。
 - 提交确认使用页面内弹窗。
 - 房间级题库、题库上传入口和 Supabase 题库字段存在。
 
@@ -90,7 +91,13 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 
 - 上传自定义题库并创建房间。
 - 从 Friends Games 大厅进入 100 Q&As。
-- 从 Friends Games 大厅进入 Friends Tycoon 规则页。
+- 从 Friends Games 大厅进入 Friends Tycoon。
+- 创建 Friends Tycoon 本地房间。
+- 加入第二位本地 Tycoon 玩家。
+- 房主开始游戏，玩家轮流掷骰和结束回合。
+- 玩家退出前出现页面内确认；确认退出后状态变为破产。
+- 刷新后 Friends Tycoon 房间状态、最终赢家和游戏记录仍可恢复。
+- Friends Tycoon 游戏结束后清空聊天。
 - 输入昵称。
 - 填写当前自定义题库的全部题目。
 - 取消一次提交确认后不会提交。
@@ -114,6 +121,7 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 
 - 通过 GitHub Pages 打开线上网页。
 - 线上首页显示 Friends Games 游戏大厅。
+- 线上 Friends Tycoon 入口和创建表单可见。
 - 上传自定义题库并创建线上房间。
 - 两个浏览器身份加入同一房间。
 - 两位玩家分别完成当前自定义题库的全部题目并提交。

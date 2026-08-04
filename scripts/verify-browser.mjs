@@ -32,6 +32,7 @@ const appUrl = pathToFileURL(join(process.cwd(), "index.html")).href + "?backend
 const customQuestions = Array.from({ length: 3 }, (_, index) => `自定义问题 ${index + 1}?`);
 const lobbyScreenshot = join(tmpdir(), "friends-games-local-lobby.png");
 const tycoonScreenshot = join(tmpdir(), "friends-games-local-tycoon.png");
+const tycoonRoomScreenshot = join(tmpdir(), "friends-games-local-tycoon-room.png");
 const resultsScreenshot = join(tmpdir(), "friends-games-local-results.png");
 const mobileLobbyScreenshot = join(tmpdir(), "friends-games-local-mobile-lobby.png");
 
@@ -71,13 +72,70 @@ try {
   assert((await page.title()).includes("Friends Games"), "App title should identify Friends Games.");
   await page.getByRole("heading", { name: "Friends Games" }).waitFor();
   await page.getByRole("button", { name: "进入 100 Q&As" }).waitFor();
+  await page.getByRole("button", { name: "进入 Friends Tycoon" }).waitFor();
   await page.screenshot({ path: lobbyScreenshot, fullPage: false });
-  await page.getByRole("button", { name: "查看规则" }).click();
+
+  await page.getByRole("button", { name: "进入 Friends Tycoon" }).click();
   await page.getByRole("heading", { name: "Friends Tycoon" }).waitFor();
   await page.getByText("32 格世界旅行").waitFor();
-  await page.getByText("最多升级 4 级").waitFor();
+  await page.getByText("退出即破产，其他人继续").waitFor();
   await page.screenshot({ path: tycoonScreenshot, fullPage: false });
-  await page.getByRole("button", { name: "返回大厅" }).click();
+
+  await page.locator("#tycoon-host-nickname").fill("Tycoon房主");
+  await page.getByRole("button", { name: "创建 Friends Tycoon 房间" }).click();
+  await page.waitForURL(/#tycoon\/room\//);
+  await page.getByText("至少 2 人开始").waitFor();
+  await page.getByRole("button", { name: "本地加朋友" }).click();
+  await page.locator(".inline-join-form input[name=\"nickname\"]").fill("Tycoon朋友");
+  await page.locator(".inline-join-form button").click();
+  await page.locator(".tycoon-player-list").getByText("Tycoon朋友").waitFor();
+  await page.locator(".tycoon-chat-form input[name=\"message\"]").fill("准备好了");
+  await page.locator(".tycoon-chat-form button").click();
+  await page.getByText("准备好了").waitFor();
+  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await page.getByText("游戏中 · 第 1 回合").first().waitFor();
+  await page.getByRole("button", { name: "掷骰子" }).click();
+  await page.locator(".dice-result").waitFor();
+  await page.getByRole("button", { name: "结束回合" }).click();
+  await page.getByRole("heading", { name: "Tycoon朋友 的回合" }).waitFor();
+  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await page.getByRole("button", { name: "退出游戏" }).click();
+  await page.getByRole("heading", { name: "确认退出吗?" }).waitFor();
+  await page.getByRole("button", { name: "确认退出" }).click();
+  await page.getByText("已结束").first().waitFor();
+  await page.reload();
+  await page.getByText("已结束").first().waitFor();
+  await page.getByText("最终结果").waitFor();
+  assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Bankrupt Tycoon player should not see the exit button again.");
+  await page.screenshot({ path: tycoonRoomScreenshot, fullPage: false });
+
+  const tycoonStateSummary = await page.evaluate(() => {
+    const raw = localStorage.getItem("friends-tycoon-state-v1");
+    const state = raw ? JSON.parse(raw) : { rooms: {} };
+    const room = Object.values(state.rooms)[0];
+    const players = room ? Object.values(room.players) : [];
+    const bankruptPlayers = players.filter((player) => player.status === "bankrupt");
+    return {
+      roomCode: room ? room.code : null,
+      status: room ? room.status : null,
+      playerCount: players.length,
+      bankruptCount: bankruptPlayers.length,
+      currentPlayerId: room ? room.currentPlayerId : null,
+      finalWinner: room && room.finalResults ? room.finalResults.winnerName : null,
+      logCount: room && room.logs ? room.logs.length : 0,
+      messageCount: room && room.messages ? room.messages.length : 0
+    };
+  });
+
+  assert(tycoonStateSummary.playerCount === 2, "Tycoon room should have two local players.");
+  assert(tycoonStateSummary.bankruptCount === 1, "Exiting Tycoon player should become bankrupt.");
+  assert(tycoonStateSummary.status === "finished", "Tycoon should finish when one active player remains.");
+  assert(tycoonStateSummary.finalWinner === "Tycoon房主", "Host should win after the other player exits.");
+  assert(tycoonStateSummary.logCount > 0, "Tycoon should keep game logs after reload.");
+  assert(tycoonStateSummary.messageCount === 0, "Tycoon should clear chat after the game ends.");
+
+  await page.getByRole("button", { name: "游戏大厅" }).click();
   await page.getByRole("heading", { name: "Friends Games" }).waitFor();
 
   await page.getByRole("button", { name: "进入 100 Q&As" }).click();
@@ -185,16 +243,18 @@ try {
   await mobilePage.goto(appUrl);
   await mobilePage.getByRole("heading", { name: "Friends Games" }).waitFor();
   assert(await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).isVisible(), "Mobile lobby should show the 100 Q&As entry.");
-  assert(await mobilePage.getByRole("button", { name: "查看规则" }).isVisible(), "Mobile lobby should show the Friends Tycoon entry.");
+  assert(await mobilePage.getByRole("button", { name: "进入 Friends Tycoon" }).isVisible(), "Mobile lobby should show the Friends Tycoon entry.");
   await mobilePage.screenshot({ path: mobileLobbyScreenshot, fullPage: false });
   assert(consoleErrors.length === 0, `Console should have no errors: ${consoleErrors.join("; ")}`);
 
   console.log(JSON.stringify({
     ok: true,
     state: stateSummary,
+    tycoonState: tycoonStateSummary,
     screenshots: {
       lobby: lobbyScreenshot,
       tycoon: tycoonScreenshot,
+      tycoonRoom: tycoonRoomScreenshot,
       results: resultsScreenshot,
       mobileLobby: mobileLobbyScreenshot
     }

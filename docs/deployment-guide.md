@@ -34,10 +34,11 @@
 - 最新规则已改为自定义题库 1 到 100 题，并已通过线上 3 题双玩家验收。
 - Friends Games 游戏大厅和 Friends Tycoon 入口已发布到 GitHub Pages。
 - Friends Games 线上验收已通过，测试房间 `D51B22` 中 2 位玩家均提交 3 题，结果页正常展示 6 条答案。
+- Friends Tycoon 本地 MVP 已完成；线上多人需要先运行最新版 `supabase/schema.sql` 以创建 `tycoon_*` 表和 RPC。
 
 ## 使用流程
 
-上线后，朋友的流程是：
+### 100 Q&As
 
 1. 打开网页。
 2. 在游戏大厅选择 `100 Q&As`。
@@ -47,7 +48,19 @@
 6. 提交。
 7. 提交后自动看到同一房间里已提交朋友的答案。
 
-`Friends Tycoon` 当前处于需求和入口搭建阶段，后续会接入独立房间与游戏同步。
+### Friends Tycoon
+
+运行最新版 SQL 后，朋友的流程是：
+
+1. 打开网页。
+2. 在游戏大厅选择 `Friends Tycoon`。
+3. 房主填写昵称，选择胜利条件，创建房间。
+4. 房主复制邀请链接或房间码发给朋友。
+5. 朋友打开链接或输入房间码，填写昵称加入。
+6. 2 到 6 人加入后，由房主开始游戏。
+7. 玩家轮流掷骰、移动、买地、升级、聊天。
+8. 玩家主动退出后状态变为破产，其他人继续。
+9. 游戏结束后查看最终结果。
 
 ## Supabase 设置
 
@@ -81,11 +94,28 @@ supabase/schema.sql
 - `qa_rooms`
 - `qa_players`
 - `qa_answers`
+- `tycoon_rooms`
+- `tycoon_players`
+- `tycoon_properties`
+- `tycoon_logs`
+- `tycoon_messages`
 - `qa_create_room`
 - `qa_get_room`
 - `qa_join_room`
 - `qa_save_answer`
 - `qa_submit_player`
+- `tycoon_create_room`
+- `tycoon_get_room`
+- `tycoon_join_room`
+- `tycoon_start_game`
+- `tycoon_roll_dice`
+- `tycoon_buy_property`
+- `tycoon_upgrade_property`
+- `tycoon_end_turn`
+- `tycoon_exit_game`
+- `tycoon_restart_room`
+- `tycoon_close_room`
+- `tycoon_send_message`
 
 网页通过这些函数读写数据，不直接开放数据表。
 

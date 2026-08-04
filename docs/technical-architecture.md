@@ -15,7 +15,8 @@
 - `#qa/create`：100 Q&As 创建房间。
 - `#qa/room/:code`：100 Q&As 房间。
 - `#room/:code`：旧版 100 Q&As 房间兼容路由。
-- `#tycoon`：Friends Tycoon 规则预览和后续入口。
+- `#tycoon`：Friends Tycoon 创建/加入入口。
+- `#tycoon/room/:code`：Friends Tycoon 房间。
 
 ## 开发阶段策略
 
@@ -155,16 +156,22 @@ supabase/schema.sql
 - 自定义题库允许 1 到 100 题；100 是当前 `qa_answers.question_index` 约束和产品上限。
 - 创建后不提供修改题库入口，避免玩家之间题目不一致。
 
-## Friends Tycoon 后续数据模型草案
+## Friends Tycoon MVP 数据模型
 
-后续实现时建议新增独立表或 RPC，不复用 `qa_*` 表：
+Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 
 - `tycoon_rooms`：房间、房主、状态、胜利条件、回合上限、地图配置、最终结果。
 - `tycoon_players`：玩家昵称、身份密钥哈希、现金、位置、是否破产、是否房主。
 - `tycoon_properties`：房间内地产归属、等级、价格、租金。
-- `tycoon_turns`：当前回合、当前玩家、骰子结果、行动状态。
 - `tycoon_logs`：游戏记录，保留关键行动。
 - `tycoon_messages`：聊天消息，可设置较短保留周期或只保留当前局。
+
+当前回合信息直接保存在 `tycoon_rooms`：
+
+- `current_turn`
+- `current_player_id`
+- `turn_phase`
+- `last_dice`
 
 关键 RPC：
 
@@ -184,6 +191,10 @@ supabase/schema.sql
 - 服务端校验是否轮到当前玩家行动。
 - 掷骰、买地、升级、结算租金和破产应放在同一个 RPC 事务中。
 - 客户端先定时刷新房间状态；如后续需要更顺滑体验，再接 Supabase Realtime。
+- 玩家身份仍采用 `player_key`：浏览器保存原始 key，服务端通过 `room_id + player_id + player_key` 校验操作权限。
+- 玩家刷新、关闭页面或闪退后，同一浏览器可通过本地身份 key 恢复到原玩家状态。
+- 玩家主动退出会调用 `tycoon_exit_game`，服务端将其置为 `bankrupt`，释放其地产并在必要时推进回合。
+- 游戏结束后 `tycoon_messages` 会清空，`tycoon_rooms.final_results` 与 `tycoon_logs` 保留最终结果和关键记录。
 
 ## 权限规则
 

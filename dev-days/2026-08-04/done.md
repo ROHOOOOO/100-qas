@@ -42,3 +42,10 @@
 - 本地 Friends Games 自动化验收通过：覆盖游戏大厅、Friends Tycoon 规则页、100 Q&As 3 题自定义房间、提交锁定、本地第二玩家和旧链接兼容。
 - GitHub Pages 已更新到提交 `e02e6e6`，发布 Friends Games 游戏大厅和 Friends Tycoon 入口。
 - 线上 Friends Games 自动化验收通过：测试房间 `D51B22` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，移动端大厅可见。
+- 接收用户补充需求：Friends Tycoon 需要处理中途关闭/闪退后的恢复，玩家可主动退出且退出后状态为破产。
+- 实现 Friends Tycoon 本地可玩 MVP：创建房间、房间码加入、本地加朋友、本地切换玩家、房主开始、重开、解散、轮流掷骰、移动、买地、升级、结束回合、聊天和游戏记录。
+- 实现 Friends Tycoon 边界规则：现金低于 0 自动破产，主动退出二次确认后变为破产，破产玩家释放地产并不能继续行动或聊天。
+- 实现 Friends Tycoon 状态恢复：本地房间、玩家身份、回合、地图、资产和记录保存到 `localStorage`，刷新后可继续。
+- 实现 Friends Tycoon 游戏结束处理：保留最终结果和游戏记录，清空聊天；最后幸存模式下已破产玩家不会因现金较高成为赢家。
+- 更新 `supabase/schema.sql`，新增 `tycoon_rooms`、`tycoon_players`、`tycoon_properties`、`tycoon_logs`、`tycoon_messages` 和 Tycoon RPC。
+- 本地自动化验收通过：测试房间 `HDFW72` 跑通 2 人加入、房主开始、掷骰、结束回合、退出即破产、刷新恢复、最终赢家和聊天结束清空。
