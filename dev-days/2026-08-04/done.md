@@ -53,3 +53,10 @@
 - 手动触发 GitHub Pages 重新构建，确认线上页面已构建到提交 `6401d3b`。
 - 线上冒烟验收通过：`scripts/verify-online.mjs` 确认 `Friends Games`、`100 Q&As`、`Friends Tycoon` 导航和移动端入口可见。
 - 线上 100 Q&As 回归通过：测试房间 `ECA783` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，提交后锁定。
+- 用户运行 Friends Tycoon 版 Supabase SQL，返回 `Success. No rows returned.`。
+- 升级 `scripts/verify-online.mjs`，加入 Friends Tycoon 线上双玩家完整验收。
+- Friends Tycoon 线上双玩家验收通过：测试房间 `5D1C74` 跑通创建房间、第二玩家加入、聊天、房主开始、掷骰、结束回合、第二玩家退出即破产、同设备重新进入恢复破产状态、最终结果和聊天清空。
+- 线上 100 Q&As 回归通过：测试房间 `6E22A5` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，提交后锁定。
+- 修复 Friends Tycoon 结束后仍显示“退出游戏”的边界问题；已结束或已解散房间不再展示退出入口。
+- 更新 `supabase/schema.sql`，为 `tycoon_exit_game` 增加后端状态保护：只有等待中或游戏中的房间可以退出。
+- GitHub Pages 已更新到提交 `25db246`，线上页面包含 Tycoon 结束后隐藏退出入口的修复。
