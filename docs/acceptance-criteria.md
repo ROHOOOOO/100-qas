@@ -35,7 +35,8 @@
 - `scripts/verify-static.mjs` 已通过，确认 Friends Games 标题、导航、Tycoon 入口和需求文档存在。
 - `scripts/verify-browser.mjs` 已通过，覆盖本地游戏大厅、Friends Tycoon 规则页、100 Q&As 新路由和旧房间链接兼容。
 - `scripts/verify-online.mjs` 已通过，确认 GitHub Pages 线上首页为 Friends Games，移动端大厅可见，线上 100 Q&As 双玩家流程仍可用。
-- 验证结果：线上测试房间 `D51B22` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案。
+- 最新验证结果：线上测试房间 `ECA783` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案。
+- GitHub Pages 已发布到提交 `6401d3b`，线上入口已包含 `Friends Tycoon`。
 
 ## Friends Tycoon MVP 验收
 
@@ -59,6 +60,7 @@
 
 - `scripts/verify-static.mjs` 已通过，确认 Tycoon 路由、按钮、破产逻辑、4 级上限和 Supabase SQL 函数存在。
 - `scripts/verify-browser.mjs` 已通过，覆盖本地 Friends Tycoon 创建房间、加入第二位玩家、房主开始、掷骰、结束回合、退出确认、退出即破产、刷新恢复、最终赢家和聊天结束清空。
+- `scripts/verify-online.mjs` 已通过，确认 GitHub Pages 线上 `Friends Tycoon` 入口和创建/加入表单可见。
 - 线上 Tycoon 多人验收待用户在 Supabase SQL Editor 运行最新版 `supabase/schema.sql` 后执行。
 
 ## 阶段 1 验收
