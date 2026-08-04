@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -29,6 +30,10 @@ function assert(condition, message) {
 const { chromium } = loadPlaywright();
 const appUrl = pathToFileURL(join(process.cwd(), "index.html")).href + "?backend=local";
 const customQuestions = Array.from({ length: 3 }, (_, index) => `自定义问题 ${index + 1}?`);
+const lobbyScreenshot = join(tmpdir(), "friends-games-local-lobby.png");
+const tycoonScreenshot = join(tmpdir(), "friends-games-local-tycoon.png");
+const resultsScreenshot = join(tmpdir(), "friends-games-local-results.png");
+const mobileLobbyScreenshot = join(tmpdir(), "friends-games-local-mobile-lobby.png");
 
 async function launchBrowser() {
   try {
@@ -40,6 +45,10 @@ async function launchBrowser() {
     }
     return chromium.launch({ executablePath: chromePath, headless: true });
   }
+}
+
+async function waitForToastsToClear(page) {
+  await page.locator(".toast").last().waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
 }
 
 const browser = await launchBrowser();
@@ -59,7 +68,19 @@ page.on("pageerror", (error) => {
 
 try {
   await page.goto(appUrl);
+  assert((await page.title()).includes("Friends Games"), "App title should identify Friends Games.");
+  await page.getByRole("heading", { name: "Friends Games" }).waitFor();
+  await page.getByRole("button", { name: "进入 100 Q&As" }).waitFor();
+  await page.screenshot({ path: lobbyScreenshot, fullPage: false });
+  await page.getByRole("button", { name: "查看规则" }).click();
+  await page.getByRole("heading", { name: "Friends Tycoon" }).waitFor();
+  await page.getByText("32 格世界旅行").waitFor();
+  await page.getByText("最多升级 4 级").waitFor();
+  await page.screenshot({ path: tycoonScreenshot, fullPage: false });
+  await page.getByRole("button", { name: "返回大厅" }).click();
+  await page.getByRole("heading", { name: "Friends Games" }).waitFor();
 
+  await page.getByRole("button", { name: "进入 100 Q&As" }).click();
   await page.getByRole("button", { name: "创建房间" }).click();
   await page.getByRole("heading", { name: "创建房间" }).waitFor();
   await page.getByRole("button", { name: "自定义题库" }).click();
@@ -70,6 +91,7 @@ try {
   await page.getByLabel("粘贴题目").fill(customQuestions.map((question, index) => `${index + 1}. ${question}`).join(" "));
   await page.getByText("已识别 3 题，可以生成房间").waitFor();
   await page.getByRole("button", { name: "生成房间" }).click();
+  await page.waitForURL(/#qa\/room\//);
 
   await page.getByLabel("昵称").fill("完整验证玩家");
   await page.getByRole("button", { name: "开始答题" }).click();
@@ -152,9 +174,31 @@ try {
   assert(stateSummary.question3 === "自定义问题 3?", "Room should persist its shorter custom question bank.");
   assert(!stateSummary.secondSubmitted, "Second player should remain unsubmitted.");
   assert(stateSummary.secondAnswerCount === 0, "Second player should have no saved answers in this scenario.");
+
+  await page.goto(`${appUrl}#room/${stateSummary.roomCode}`);
+  await page.getByRole("heading", { name: "大家的答案" }).waitFor();
+  await waitForToastsToClear(page);
+  await page.screenshot({ path: resultsScreenshot, fullPage: false });
+
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const mobilePage = await mobileContext.newPage();
+  await mobilePage.goto(appUrl);
+  await mobilePage.getByRole("heading", { name: "Friends Games" }).waitFor();
+  assert(await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).isVisible(), "Mobile lobby should show the 100 Q&As entry.");
+  assert(await mobilePage.getByRole("button", { name: "查看规则" }).isVisible(), "Mobile lobby should show the Friends Tycoon entry.");
+  await mobilePage.screenshot({ path: mobileLobbyScreenshot, fullPage: false });
   assert(consoleErrors.length === 0, `Console should have no errors: ${consoleErrors.join("; ")}`);
 
-  console.log(JSON.stringify({ ok: true, state: stateSummary }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    state: stateSummary,
+    screenshots: {
+      lobby: lobbyScreenshot,
+      tycoon: tycoonScreenshot,
+      results: resultsScreenshot,
+      mobileLobby: mobileLobbyScreenshot
+    }
+  }, null, 2));
 } finally {
   await browser.close();
 }

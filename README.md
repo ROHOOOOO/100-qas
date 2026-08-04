@@ -1,11 +1,16 @@
-# 100 Q&As
+# Friends Games
 
-给熟人朋友玩的私密网页问答游戏。每位参与者独立回答同一房间的一组问题，完成提交后才能查看同一房间内其他朋友的答案。默认题库是 100 题，自定义题库支持 1 到 100 题。
+给熟人朋友玩的私密网页小游戏集合。当前包含 `100 Q&As`，并开始规划与搭建 `Friends Tycoon`。
+
+`100 Q&As` 是问答游戏：每位参与者独立回答同一房间的一组问题，完成提交后才能查看同一房间内其他朋友的答案。默认题库是 100 题，自定义题库支持 1 到 100 题。
+
+`Friends Tycoon` 是文字版线上大富翁：计划支持 2 到 6 位朋友同房间游玩，房主开始/重开/解散，聊天区与游戏记录分开。
 
 ## 项目文件指引
 
 - 产品需求：[docs/product-requirements.md](docs/product-requirements.md)
 - 默认 100 题题库：[docs/question-bank.md](docs/question-bank.md)
+- Friends Tycoon 需求：[docs/friends-tycoon-requirements.md](docs/friends-tycoon-requirements.md)
 - 技术架构：[docs/technical-architecture.md](docs/technical-architecture.md)
 - 设计规范：[docs/design-guidelines.md](docs/design-guidelines.md)
 - 开发执行标准：[docs/development-workflow.md](docs/development-workflow.md)
@@ -37,6 +42,9 @@
 截至 2026-08-04：
 
 - 已读取并整理用户提供的 `100 Q&As.docx`。
+- 已确认项目整体名称升级为 `Friends Games`，`100 Q&As` 与 `Friends Tycoon` 为并列小游戏。
+- 已新增游戏大厅和顶部导航入口。
+- 已新增 `Friends Tycoon` 规则预览页，记录玩家上限、地图、升级、胜利条件、聊天和房主权限等第一版方向。
 - 已确认 MVP 需求。
 - 已确定第一版不做账号系统，采用私密房间 + 昵称 + 本地身份密钥。
 - 已确认每页 5 题；默认 100 题共 20 页，自定义题库页数按题量变化。

@@ -4,8 +4,18 @@
 
 - 先做可运行、可验证的最小闭环。
 - 避免过早引入复杂账号系统。
+- `Friends Games` 采用多游戏入口，每个小游戏拥有独立路由和数据域。
 - 数据模型提前按多人房间设计，方便后续接入真实数据库。
 - 前端交互先稳定，再逐步接入后端。
+
+## 当前信息架构
+
+- `#home`：Friends Games 游戏大厅。
+- `#qa`：100 Q&As 首页。
+- `#qa/create`：100 Q&As 创建房间。
+- `#qa/room/:code`：100 Q&As 房间。
+- `#room/:code`：旧版 100 Q&As 房间兼容路由。
+- `#tycoon`：Friends Tycoon 规则预览和后续入口。
 
 ## 开发阶段策略
 
@@ -53,6 +63,24 @@
 - Supabase 负责在线保存房间、玩家和答案。
 - 没有 Supabase 配置时，网页自动使用本地模式。
 
+### 阶段 3：Friends Games 多游戏底座
+
+目标：
+
+- 把原 `100 Q&As` 单页入口升级为 `Friends Games` 游戏大厅。
+- 保持 `100 Q&As` 现有线上流程稳定。
+- 为 `Friends Tycoon` 预留独立路由、文档和后续数据模型。
+
+### 阶段 4：Friends Tycoon 真实多人版本
+
+建议技术：
+
+- 前端继续使用静态 HTML/CSS/JS，先做轻量可玩的 MVP。
+- 后端继续使用 Supabase Postgres 和 RPC。
+- 房间状态以服务端为准，前端只提交玩家动作。
+- 每个玩家动作通过 RPC 校验当前回合、玩家身份、现金和资产状态。
+- 聊天和游戏记录分开保存；聊天只保留近期内容或单局临时内容。
+
 ## 配置模式
 
 配置文件：
@@ -89,6 +117,8 @@ supabase/schema.sql
 
 ## 数据模型
 
+当前已实现数据模型用于 `100 Q&As`。
+
 ### Room
 
 - `id`: 房间唯一 ID。
@@ -124,6 +154,36 @@ supabase/schema.sql
 - 自定义题库以 `qa_rooms.questions` 的 `jsonb` 数组保存。
 - 自定义题库允许 1 到 100 题；100 是当前 `qa_answers.question_index` 约束和产品上限。
 - 创建后不提供修改题库入口，避免玩家之间题目不一致。
+
+## Friends Tycoon 后续数据模型草案
+
+后续实现时建议新增独立表或 RPC，不复用 `qa_*` 表：
+
+- `tycoon_rooms`：房间、房主、状态、胜利条件、回合上限、地图配置、最终结果。
+- `tycoon_players`：玩家昵称、身份密钥哈希、现金、位置、是否破产、是否房主。
+- `tycoon_properties`：房间内地产归属、等级、价格、租金。
+- `tycoon_turns`：当前回合、当前玩家、骰子结果、行动状态。
+- `tycoon_logs`：游戏记录，保留关键行动。
+- `tycoon_messages`：聊天消息，可设置较短保留周期或只保留当前局。
+
+关键 RPC：
+
+- `tycoon_create_room`
+- `tycoon_join_room`
+- `tycoon_start_game`
+- `tycoon_roll_dice`
+- `tycoon_buy_property`
+- `tycoon_upgrade_property`
+- `tycoon_end_turn`
+- `tycoon_restart_room`
+- `tycoon_close_room`
+- `tycoon_send_message`
+
+并发策略：
+
+- 服务端校验是否轮到当前玩家行动。
+- 掷骰、买地、升级、结算租金和破产应放在同一个 RPC 事务中。
+- 客户端先定时刷新房间状态；如后续需要更顺滑体验，再接 Supabase Realtime。
 
 ## 权限规则
 

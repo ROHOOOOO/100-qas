@@ -115,7 +115,16 @@ collectPageHealth(pageA, "player-a", health);
 
 try {
   await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
-  assert((await pageA.title()).includes("100 Q&As"), "Production page title should identify 100 Q&As.");
+  assert((await pageA.title()).includes("Friends Games"), "Production page title should identify Friends Games.");
+  await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
+  await pageA.getByRole("button", { name: "查看规则" }).click();
+  await pageA.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 20000 });
+  await pageA.getByText("32 格世界旅行").waitFor({ timeout: 15000 });
+  await pageA.getByText("最多升级 4 级").waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "返回大厅" }).click();
+  await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
+
+  await pageA.getByRole("button", { name: "进入 100 Q&As" }).click();
   await waitForHeroImage(pageA);
   await pageA.getByRole("button", { name: "创建房间" }).waitFor({ timeout: 20000 });
   await pageA.getByRole("button", { name: "创建房间" }).click();
@@ -127,11 +136,12 @@ try {
   await pageA.getByLabel("粘贴题目").fill(customQuestions.map((question, index) => `${index + 1}. ${question}`).join(" "));
   await pageA.getByText("已识别 3 题，可以生成房间").waitFor({ timeout: 15000 });
   await pageA.getByRole("button", { name: "生成房间" }).click();
+  await pageA.waitForURL(/#qa\/room\//, { timeout: 20000 });
 
   await joinAndSubmit(pageA, "线上测试A", "线上A答案", customQuestions.length);
 
   const roomUrl = pageA.url();
-  const roomCode = roomUrl.split("#room/")[1];
+  const roomCode = roomUrl.split("#qa/room/")[1];
   assert(Boolean(roomCode), "Room URL should include a room code.");
 
   await pageA.waitForFunction(() => document.querySelectorAll(".result-card").length === 3, null, {
@@ -145,7 +155,7 @@ try {
   const pageB = await contextB.newPage();
   collectPageHealth(pageB, "player-b", health);
 
-  await pageB.goto(`${appUrl}#room/${roomCode}`, { waitUntil: "domcontentloaded" });
+  await pageB.goto(`${appUrl}#qa/room/${roomCode}`, { waitUntil: "domcontentloaded" });
   await joinAndSubmit(pageB, "线上测试B", "线上B答案", customQuestions.length);
 
   await pageB.waitForFunction(() => document.querySelectorAll(".answer-row").length >= 6, null, {
@@ -169,8 +179,8 @@ try {
   const mobilePage = await mobileContext.newPage();
   collectPageHealth(mobilePage, "mobile-home", health);
   await mobilePage.goto(appUrl, { waitUntil: "domcontentloaded" });
-  await waitForHeroImage(mobilePage);
-  await mobilePage.getByRole("button", { name: "创建房间" }).waitFor({ timeout: 20000 });
+  await mobilePage.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
+  await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).waitFor({ timeout: 20000 });
   await mobilePage.screenshot({ path: mobileScreenshot, fullPage: false });
 
   const relevantLogs = health.logs.filter((entry) => {
@@ -188,7 +198,8 @@ try {
       answerRows: await pageA.locator(".answer-row").count(),
       lockedFields: await pageA.locator("textarea").count() === 0,
       customQuestion3Visible: await pageA.getByText("线上自定义问题 3?").count() === 1,
-      mobileCreateRoomVisible: await mobilePage.getByRole("button", { name: "创建房间" }).isVisible()
+      mobileLobbyVisible: await mobilePage.getByRole("heading", { name: "Friends Games" }).isVisible(),
+      mobileQaEntryVisible: await mobilePage.getByRole("button", { name: "进入 100 Q&As" }).isVisible()
     },
     screenshots: {
       results: resultScreenshot,

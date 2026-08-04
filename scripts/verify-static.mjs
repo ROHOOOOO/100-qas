@@ -13,6 +13,7 @@ const configJs = readFileSync("src/config.js", "utf8");
 const questionsJs = readFileSync("src/questions.js", "utf8");
 const stylesCss = readFileSync("src/styles.css", "utf8");
 const supabaseSql = readFileSync("supabase/schema.sql", "utf8");
+const tycoonRequirements = readFileSync("docs/friends-tycoon-requirements.md", "utf8");
 
 const sandbox = { window: {} };
 vm.createContext(sandbox);
@@ -26,7 +27,14 @@ assert(indexHtml.includes("src/questions.js"), "index.html must load src/questio
 assert(indexHtml.includes("src/config.js"), "index.html must load src/config.js.");
 assert(indexHtml.includes("src/app.js"), "index.html must load src/app.js.");
 assert(indexHtml.includes("src/styles.css"), "index.html must load src/styles.css.");
+assert(indexHtml.includes("<title>Friends Games</title>"), "index.html title should identify Friends Games.");
 assert(appJs.includes("assets/question-tabletop.png"), "The app must reference the project visual asset.");
+assert(appJs.includes("Friends Games"), "App must include the Friends Games shell.");
+assert(appJs.includes("renderGameLobby"), "App must render a game lobby.");
+assert(appJs.includes("Friends Tycoon"), "App must include the Friends Tycoon entry.");
+assert(appJs.includes("#qa/room/"), "Room links should use the 100 Q&As route namespace.");
+assert(appJs.includes('data-action="open-tycoon"'), "App must expose a Friends Tycoon navigation action.");
+assert(appJs.includes('pageName === "room"'), "App must keep old room route compatibility.");
 assert(configJs.includes("window.QA_CONFIG"), "Config file must expose window.QA_CONFIG.");
 assert(configJs.includes('backend: "supabase"'), "Config should be ready for Supabase online mode.");
 assert(configJs.includes("https://yexwacezlklxqlmwgtfe.supabase.co"), "Config must include the Supabase project URL.");
@@ -62,6 +70,9 @@ assert(stylesCss.includes(".room-summary"), "Room summary styles must exist.");
 assert(stylesCss.includes(".player-row"), "Local player row styles must exist.");
 assert(stylesCss.includes(".segmented-control"), "Question bank segmented control styles must exist.");
 assert(stylesCss.includes(".question-check"), "Question bank validation styles must exist.");
+assert(stylesCss.includes(".site-nav"), "Friends Games navigation styles must exist.");
+assert(stylesCss.includes(".game-card"), "Game lobby card styles must exist.");
+assert(stylesCss.includes(".tycoon-rules"), "Friends Tycoon rules styles must exist.");
 assert(supabaseSql.includes("create table if not exists public.qa_rooms"), "Supabase SQL must create qa_rooms.");
 assert(supabaseSql.includes("create table if not exists public.qa_players"), "Supabase SQL must create qa_players.");
 assert(supabaseSql.includes("create table if not exists public.qa_answers"), "Supabase SQL must create qa_answers.");
@@ -73,5 +84,9 @@ assert(supabaseSql.includes("between 1 and 100"), "Supabase SQL should return st
 assert(supabaseSql.includes("Question bank must contain at least 1 question."), "Supabase SQL should reject empty custom question banks.");
 assert(supabaseSql.includes("Question bank can contain at most 100 questions."), "Supabase SQL should keep the 100 question upper bound.");
 assert(supabaseSql.includes("qa_submit_player"), "Supabase SQL must define qa_submit_player.");
+assert(tycoonRequirements.includes("玩家上限 6 人"), "Friends Tycoon requirements must include the player cap.");
+assert(tycoonRequirements.includes("32 个格子"), "Friends Tycoon requirements must include the 32-cell map.");
+assert(tycoonRequirements.includes("最多 4 级"), "Friends Tycoon requirements must include the upgrade cap.");
+assert(tycoonRequirements.includes("聊天区与游戏记录分开"), "Friends Tycoon requirements must keep chat separate from game logs.");
 
 console.log("Static verification passed.");

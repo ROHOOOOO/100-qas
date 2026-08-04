@@ -15,6 +15,24 @@
     rawText: "",
     questions: defaultQuestions.slice()
   };
+  var games = [
+    {
+      id: "qa",
+      title: "100 Q&As",
+      description: "慢慢答完一组问题，提交之后再看朋友们的答案。",
+      action: "open-qa",
+      cta: "进入 100 Q&As",
+      meta: "已上线"
+    },
+    {
+      id: "tycoon",
+      title: "Friends Tycoon",
+      description: "文字版线上大富翁，支持 2 到 6 位朋友同房间游玩。",
+      action: "open-tycoon",
+      cta: "查看规则",
+      meta: "设计中"
+    }
+  ];
 
   function getConfig() {
     var config = window.QA_CONFIG || {};
@@ -289,8 +307,35 @@
     return raw ? raw.split("/") : ["home"];
   }
 
+  function getQaRoomCode() {
+    var parts = getHashParts();
+    if (parts[0] === "qa" && parts[1] === "room") return parts[2] || "";
+    if (parts[0] === "room") return parts[1] || "";
+    return "";
+  }
+
   function setRoute(path) {
     window.location.hash = path;
+  }
+
+  function renderShell(content, activeGame) {
+    app.innerHTML = [
+      renderGlobalNav(activeGame),
+      content
+    ].join("");
+  }
+
+  function renderGlobalNav(activeGame) {
+    return [
+      '<header class="site-nav">',
+      '  <button class="brand-button" data-action="open-lobby" type="button">Friends Games</button>',
+      '  <nav aria-label="游戏导航">',
+      '    <button class="' + (activeGame === "lobby" ? "is-active" : "") + '" data-action="open-lobby" type="button">游戏大厅</button>',
+      '    <button class="' + (activeGame === "qa" ? "is-active" : "") + '" data-action="open-qa" type="button">100 Q&As</button>',
+      '    <button class="' + (activeGame === "tycoon" ? "is-active" : "") + '" data-action="open-tycoon" type="button">Friends Tycoon</button>',
+      '  </nav>',
+      '</header>'
+    ].join("");
   }
 
   function getRoomByCode(state, code) {
@@ -341,7 +386,7 @@
 
   function roomLink(room) {
     var base = window.location.href.split("#")[0];
-    return base + "#room/" + room.code;
+    return base + "#qa/room/" + room.code;
   }
 
   function normalizeOnlineRoom(bundle) {
@@ -433,6 +478,29 @@
     var parts = getHashParts();
     var pageName = parts[0] || "home";
 
+    if (pageName === "qa") {
+      if (parts[1] === "room") {
+        if (isSupabaseMode() && !options.skipOnlineSync) {
+          try {
+            await syncOnlineRoom(parts[2]);
+            state = loadState();
+          } catch (error) {
+            showToast("线上房间同步失败，请检查 Supabase 配置。");
+          }
+        }
+        renderRoom(state, parts[2]);
+        return;
+      }
+
+      if (parts[1] === "create") {
+        renderCreateRoom(state);
+        return;
+      }
+
+      renderQaHome(state);
+      return;
+    }
+
     if (pageName === "room") {
       if (isSupabaseMode() && !options.skipOnlineSync) {
         try {
@@ -451,17 +519,49 @@
       return;
     }
 
-    renderHome(state);
+    if (pageName === "tycoon") {
+      renderTycoonHome();
+      return;
+    }
+
+    renderGameLobby();
   }
 
-  function renderHome(state) {
+  function renderGameLobby() {
+    document.title = "Friends Games";
+    renderShell([
+      '<main class="lobby-layout">',
+      '  <section class="lobby-intro">',
+      '    <h1>Friends Games</h1>',
+      '    <p class="lead">给熟人朋友准备的小网页游戏集合，开房间，把链接发给朋友，就能一起玩。</p>',
+      '  </section>',
+      '  <section class="game-grid" aria-label="选择游戏">',
+      games.map(function (game) {
+        return [
+          '<article class="game-card game-card-' + escapeHtml(game.id) + '">',
+          '  <div>',
+          '    <span>' + escapeHtml(game.meta) + '</span>',
+          '    <h2>' + escapeHtml(game.title) + '</h2>',
+          '    <p>' + escapeHtml(game.description) + '</p>',
+          '  </div>',
+          '  <button class="primary-button" data-action="' + escapeHtml(game.action) + '" type="button">' + escapeHtml(game.cta) + '</button>',
+          '</article>'
+        ].join("");
+      }).join(""),
+      '  </section>',
+      '</main>'
+    ].join(""), "lobby");
+  }
+
+  function renderQaHome(state) {
+    document.title = "100 Q&As | Friends Games";
     var recentRooms = Object.keys(state.rooms).map(function (id) {
       return state.rooms[id];
     }).sort(function (a, b) {
       return b.createdAt.localeCompare(a.createdAt);
     });
 
-    app.innerHTML = [
+    renderShell([
       '<main class="home-layout">',
       '  <section class="hero-copy">',
       '    <p class="eyebrow">Private friends game</p>',
@@ -483,7 +583,30 @@
       '    <img src="assets/question-tabletop.png" alt="">',
       '  </section>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
+  }
+
+  function renderTycoonHome() {
+    document.title = "Friends Tycoon | Friends Games";
+    renderShell([
+      '<main class="tycoon-preview-layout">',
+      '  <section class="panel tycoon-panel">',
+      '    <p class="eyebrow">Online board game</p>',
+      '    <h1>Friends Tycoon</h1>',
+      '    <p class="muted">文字版线上大富翁会以房间制运行，2 到 6 人加入后由房主开始游戏。</p>',
+      '    <div class="tycoon-rules">',
+      '      <div><span>地图</span><strong>32 格世界旅行</strong></div>',
+      '      <div><span>地产</span><strong>最多升级 4 级</strong></div>',
+      '      <div><span>胜利</span><strong>破产淘汰 / 回合上限</strong></div>',
+      '      <div><span>房主</span><strong>开始、重开、解散</strong></div>',
+      '    </div>',
+      '    <div class="dialog-actions">',
+      '      <button class="secondary-button" data-action="open-lobby" type="button">返回大厅</button>',
+      '      <button class="primary-button" disabled type="button">下一步开发</button>',
+      '    </div>',
+      '  </section>',
+      '</main>'
+    ].join(""), "tycoon");
   }
 
   function renderCreateRoom() {
@@ -491,7 +614,7 @@
     var isDefault = createRoomDraft.mode === "default";
     var previewQuestions = selectedQuestions.slice(0, 3);
 
-    app.innerHTML = [
+    renderShell([
       '<main class="narrow-layout">',
       '  <section class="panel create-panel">',
       '    <p class="eyebrow">New room</p>',
@@ -523,13 +646,13 @@
       ].join("") : '        <ol data-question-preview></ol>',
       '      </section>',
       '      <div class="dialog-actions">',
-      '        <button type="button" class="secondary-button" data-action="go-home">返回</button>',
+      '        <button type="button" class="secondary-button" data-action="open-qa">返回</button>',
       '        <button class="primary-button" type="submit" data-create-submit>生成房间</button>',
       '      </div>',
       '    </form>',
       '  </section>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
   }
 
   function renderRecentRooms(rooms) {
@@ -573,22 +696,22 @@
   }
 
   function renderMissingRoom(code) {
-    app.innerHTML = [
+    renderShell([
       '<main class="narrow-layout">',
       '  <section class="panel">',
       '    <p class="eyebrow">Room not found</p>',
       '    <h1>没有找到这个房间</h1>',
-      '    <p class="muted">房间码 ' + escapeHtml(code || "") + ' 在这个本地原型里不存在。</p>',
-      '    <button class="primary-button" data-action="go-home">回到首页</button>',
+      '    <p class="muted">房间码 ' + escapeHtml(code || "") + ' 不存在，或暂时没有同步成功。</p>',
+      '    <button class="primary-button" data-action="open-lobby">回到游戏大厅</button>',
       '  </section>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
   }
 
   function renderJoinRoom(room) {
     var existingPlayers = getRoomPlayers(room);
 
-    app.innerHTML = [
+    renderShell([
       '<main class="narrow-layout">',
       '  <section class="panel">',
       '    <p class="eyebrow">Room ' + escapeHtml(room.code) + '</p>',
@@ -602,7 +725,7 @@
       existingPlayers.length ? renderLocalPlayers(room, null) : "",
       '  </section>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
   }
 
   function renderAnswerPage(room, player) {
@@ -613,7 +736,7 @@
     var done = answeredCount(player, room);
     var canSubmit = done === roomQuestions.length;
 
-    app.innerHTML = [
+    renderShell([
       '<main class="answer-layout">',
       renderRoomHeader(room, player, done),
       renderRoomSummary(room, player),
@@ -639,7 +762,7 @@
       '  </nav>',
       canSubmit ? "" : '<p class="submit-hint">还差 ' + (roomQuestions.length - done) + ' 题就可以提交。</p>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
   }
 
   function renderRoomHeader(room, player, done) {
@@ -718,7 +841,7 @@
       .map(function (id) { return room.players[id]; })
       .filter(function (item) { return Boolean(item.submittedAt); });
 
-    app.innerHTML = [
+    renderShell([
       '<main class="results-layout">',
       '  <header class="room-header">',
       '    <div>',
@@ -755,7 +878,7 @@
       }).join(""),
       '  </section>',
       '</main>'
-    ].join("");
+    ].join(""), "qa");
   }
 
   async function createRoom(roomQuestions) {
@@ -785,7 +908,7 @@
         if (!onlineRoom) throw new Error("Room was not created.");
         cacheRoom(onlineRoom);
         resetCreateRoomDraft();
-        setRoute("room/" + onlineRoom.code);
+        setRoute("qa/room/" + onlineRoom.code);
       } catch (error) {
         showToast(isCustom ? "自定义题库线上创建失败，请确认已运行最新版 Supabase SQL。" : "线上房间创建失败，请检查 Supabase 配置。");
       }
@@ -810,7 +933,7 @@
     state.rooms[room.id] = room;
     saveState(state);
     resetCreateRoomDraft();
-    setRoute("room/" + room.code);
+    setRoute("qa/room/" + room.code);
   }
 
   function submitCreateRoom() {
@@ -923,8 +1046,7 @@
 
   function updateAnswer(questionNumber, content) {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player || player.submittedAt) return;
@@ -1004,8 +1126,7 @@
 
   function changePage(delta) {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player) return;
@@ -1020,8 +1141,7 @@
 
   function submitAnswers() {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player) return;
@@ -1037,8 +1157,7 @@
 
   async function finishSubmitAnswers() {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
     var player = getCurrentPlayer(room);
     if (!player || player.submittedAt) return;
@@ -1114,8 +1233,7 @@
 
   function copyLink() {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
     var link = roomLink(room);
 
@@ -1143,8 +1261,7 @@
 
   function clearCurrentPlayer() {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room) return;
 
     var identities = loadIdentities();
@@ -1156,8 +1273,7 @@
 
   function switchPlayer(playerId) {
     var state = loadState();
-    var parts = getHashParts();
-    var room = getRoomByCode(state, parts[1]);
+    var room = getRoomByCode(state, getQaRoomCode());
     if (!room || !room.players[playerId]) return;
 
     if (isSupabaseMode()) {
@@ -1175,10 +1291,13 @@
     if (!target || target.tagName === "FORM") return;
 
     var action = target.getAttribute("data-action");
-    if (action === "open-create-room") setRoute("create");
+    if (action === "open-lobby") setRoute("home");
+    if (action === "open-qa") setRoute("qa");
+    if (action === "open-tycoon") setRoute("tycoon");
+    if (action === "open-create-room") setRoute("qa/create");
     if (action === "set-question-mode") setQuestionMode(target.getAttribute("data-mode"));
     if (action === "go-home") setRoute("home");
-    if (action === "open-room") setRoute("room/" + target.getAttribute("data-code"));
+    if (action === "open-room") setRoute("qa/room/" + target.getAttribute("data-code"));
     if (action === "prev-page") changePage(-1);
     if (action === "next-page") changePage(1);
     if (action === "submit-answers") submitAnswers();
@@ -1202,7 +1321,7 @@
     if (action === "join-code") {
       var formData = new FormData(form);
       var code = String(formData.get("roomCode") || "").trim().toUpperCase();
-      if (code) setRoute("room/" + code);
+      if (code) setRoute("qa/room/" + code);
     }
 
     if (action === "join-room") {

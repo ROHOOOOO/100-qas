@@ -2,4 +2,6 @@
 
 - 正式使用前，建议创建一个真实自定义题库房间，用自己的手机和朋友手机各提交一次，做最后人工确认。
 - 后续可考虑支持直接解析 `.docx` 题库文件。
-- 线上启用“不满 100 题也能生成房间”前，需要在 Supabase SQL Editor 再运行一次最新版 `supabase/schema.sql`。
+- 完成 Friends Games 大厅和导航的线上验证后，同步到 GitHub Pages。
+- 下一步开发 Friends Tycoon MVP：先设计 Supabase SQL 和本地房间状态，再做 2 人轮流掷骰的最小闭环。
+- Friends Tycoon 后续需要确认地产价格、租金、升级成本、回合上限选项和破产清算细节。

@@ -33,3 +33,9 @@
 - 通过 Supabase RPC 探测确认 3 题自定义题库已可创建线上房间。
 - 线上 3 题双玩家完整验收通过：测试房间 `6D1CFF` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，并确认提交后锁定。
 - 调整首页提示文案，从“答完 100 个问题”改为“答完这组问题”，适配不满 100 题的自定义题库。
+- 确认项目整体升级为 `Friends Games`，`100 Q&As` 与 `Friends Tycoon` 为并列小游戏。
+- 确认 `Friends Tycoon` 第一版核心需求：2 到 6 人、32 格地图、地产最多 4 级、现金低于 0 破产、房主可选两种胜利条件、聊天区与游戏记录分开、房主拥有开始/重开/解散权限。
+- 新增 `docs/friends-tycoon-requirements.md`，记录 Friends Tycoon 需求、地图灵感、UI 方向和后续待确认项。
+- 开始实现 Friends Games 多游戏底座：新增游戏大厅、顶部导航、`100 Q&As` 和 `Friends Tycoon` 并列入口。
+- 新增 `Friends Tycoon` 规则预览页，作为后续开发入口。
+- 调整 100 Q&As 新路由为 `#qa/room/:code`，并保留旧版 `#room/:code` 兼容。
