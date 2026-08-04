@@ -1238,6 +1238,7 @@
     var canStart = isHost && room.status === "lobby" && getTycoonPresentPlayers(room).length >= TYCOON_MIN_PLAYERS;
     var canRestart = isHost && (room.status === "active" || room.status === "finished");
     var canClose = isHost && room.status !== "closed";
+    var canExit = player && player.status !== "bankrupt" && (room.status === "lobby" || room.status === "active");
     return [
       '<header class="tycoon-room-header panel">',
       '  <div>',
@@ -1248,7 +1249,7 @@
       '  <div class="tycoon-room-tools">',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-tycoon-link" type="button">↗</button>',
       player && !isSupabaseMode() && room.status === "lobby" ? '    <button class="secondary-button" data-action="new-local-tycoon-player" type="button">本地加朋友</button>' : "",
-      player && player.status !== "bankrupt" ? '    <button class="secondary-button" data-action="tycoon-exit" type="button">退出游戏</button>' : "",
+      canExit ? '    <button class="secondary-button" data-action="tycoon-exit" type="button">退出游戏</button>' : "",
       player && player.status === "bankrupt" ? '    <span class="small-status">已破产</span>' : "",
       canStart ? '    <button class="primary-button" data-action="tycoon-start" type="button">开始游戏</button>' : "",
       isHost && room.status === "lobby" && !canStart ? '    <span class="small-status">至少 2 人开始</span>' : "",
@@ -2476,6 +2477,10 @@
     if (!bundle || !bundle.player || bundle.player.status === "bankrupt") return;
     var room = bundle.room;
     var player = bundle.player;
+    if (room.status !== "lobby" && room.status !== "active") {
+      showToast("这局已经结束，不能再退出。");
+      return;
+    }
     var wasCurrent = room.currentPlayerId === player.id;
     bankruptTycoonPlayer(room, player, "玩家主动退出。");
 
