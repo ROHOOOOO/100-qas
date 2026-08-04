@@ -39,3 +39,6 @@
 - 开始实现 Friends Games 多游戏底座：新增游戏大厅、顶部导航、`100 Q&As` 和 `Friends Tycoon` 并列入口。
 - 新增 `Friends Tycoon` 规则预览页，作为后续开发入口。
 - 调整 100 Q&As 新路由为 `#qa/room/:code`，并保留旧版 `#room/:code` 兼容。
+- 本地 Friends Games 自动化验收通过：覆盖游戏大厅、Friends Tycoon 规则页、100 Q&As 3 题自定义房间、提交锁定、本地第二玩家和旧链接兼容。
+- GitHub Pages 已更新到提交 `e02e6e6`，发布 Friends Games 游戏大厅和 Friends Tycoon 入口。
+- 线上 Friends Games 自动化验收通过：测试房间 `D51B22` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案，移动端大厅可见。

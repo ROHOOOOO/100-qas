@@ -30,6 +30,13 @@
 - 旧版 `#room/:code` 链接仍可打开 100 Q&As 房间。
 - `Friends Tycoon` 入口展示已确认的第一版规则：2 到 6 人、32 格地图、最多 4 级升级、两种胜利条件、房主权限。
 
+当前验证状态：
+
+- `scripts/verify-static.mjs` 已通过，确认 Friends Games 标题、导航、Tycoon 入口和需求文档存在。
+- `scripts/verify-browser.mjs` 已通过，覆盖本地游戏大厅、Friends Tycoon 规则页、100 Q&As 新路由和旧房间链接兼容。
+- `scripts/verify-online.mjs` 已通过，确认 GitHub Pages 线上首页为 Friends Games，移动端大厅可见，线上 100 Q&As 双玩家流程仍可用。
+- 验证结果：线上测试房间 `D51B22` 中 2 位玩家均提交 3 题，结果页显示 3 个题目卡和 6 条答案。
+
 ## Friends Tycoon MVP 验收草案
 
 - 2 到 6 位玩家可进入同一房间。
