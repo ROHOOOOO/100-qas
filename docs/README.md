@@ -7,6 +7,7 @@
 - [product-requirements.md](product-requirements.md)：产品需求、用户流程、功能边界。
 - [question-bank.md](question-bank.md)：100 个问题的正式题库。
 - [friends-tycoon-requirements.md](friends-tycoon-requirements.md)：Friends Tycoon 的已确认玩法、UI 和后续待确认项。
+- [account-and-export-requirements.md](account-and-export-requirements.md)：账号、多端同步和 PDF 导出需求。
 - [technical-architecture.md](technical-architecture.md)：技术路线、数据模型、权限方案。
 - [design-guidelines.md](design-guidelines.md)：视觉、交互、移动端设计规范。
 - [development-workflow.md](development-workflow.md)：开发节奏、每日记录、变更规则。

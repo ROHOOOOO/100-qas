@@ -3,6 +3,7 @@
   var IDENTITY_KEY = "hundred-qas-current-players-v1";
   var TYCOON_STORAGE_KEY = "friends-tycoon-state-v1";
   var TYCOON_IDENTITY_KEY = "friends-tycoon-current-players-v1";
+  var AUTH_SESSION_KEY = "friends-games-auth-session-v1";
   var PAGE_SIZE = 5;
   var QUESTION_TARGET = 100;
   var QUESTION_MINIMUM = 1;
@@ -20,6 +21,7 @@
   var saveTimer = null;
   var remoteAnswerTimers = {};
   var tycoonPollTimer = null;
+  var accountRecordsCache = null;
   var createRoomDraft = {
     mode: "default",
     rawText: "",
@@ -96,11 +98,134 @@
     return config.backend === "supabase" && Boolean(config.supabaseUrl) && Boolean(config.supabaseAnonKey);
   }
 
+  function loadAuthSession() {
+    try {
+      var saved = localStorage.getItem(AUTH_SESSION_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveAuthSession(session) {
+    if (!session || !session.access_token) return;
+    var existing = loadAuthSession();
+    var savedSession = Object.assign({}, session);
+    if (!savedSession.user && existing && existing.user) {
+      savedSession.user = existing.user;
+    }
+    if (!savedSession.expires_at && savedSession.expires_in) {
+      savedSession.expires_at = Math.floor(Date.now() / 1000) + Number(savedSession.expires_in);
+    }
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(savedSession));
+    accountRecordsCache = null;
+  }
+
+  function normalizeAuthSession(result) {
+    if (!result) return null;
+    var session = result.session || result;
+    if (result.user && !session.user) {
+      session.user = result.user;
+    }
+    return session;
+  }
+
+  function clearAuthSession() {
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    accountRecordsCache = null;
+  }
+
+  function getAuthUser() {
+    var session = loadAuthSession();
+    return session && session.user ? session.user : null;
+  }
+
+  function getAuthAccessToken() {
+    var session = loadAuthSession();
+    if (!session || !session.access_token) return "";
+    return session.access_token;
+  }
+
+  function isLoggedIn() {
+    return Boolean(getAuthAccessToken() && getAuthUser());
+  }
+
+  function accountLabel() {
+    var user = getAuthUser();
+    if (!user) return "登录";
+    return user.email || user.phone || "我的账号";
+  }
+
+  function authBaseUrl() {
+    var config = getConfig();
+    return String(config.supabaseUrl || "").replace(/\/$/, "") + "/auth/v1";
+  }
+
+  async function authRequest(path, body, options) {
+    options = options || {};
+    var config = getConfig();
+    var headers = {
+      apikey: config.supabaseAnonKey,
+      "Content-Type": "application/json"
+    };
+    if (options.accessToken) {
+      headers.Authorization = "Bearer " + options.accessToken;
+    }
+
+    var response = await fetch(authBaseUrl() + path, {
+      method: options.method || "POST",
+      headers: headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    var data = null;
+    var text = await response.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        data = { message: text };
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error((data && (data.msg || data.message || data.error_description || data.error)) || "Auth request failed.");
+    }
+
+    return data || {};
+  }
+
+  function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  async function ensureFreshAuthSession() {
+    if (!isSupabaseMode()) return;
+    var session = loadAuthSession();
+    if (!session || !session.refresh_token) return;
+
+    var expiresAt = Number(session.expires_at || 0);
+    var nowSeconds = Math.floor(Date.now() / 1000);
+    if (expiresAt && expiresAt - nowSeconds > 90) return;
+
+    try {
+      var refreshed = await authRequest("/token?grant_type=refresh_token", {
+        refresh_token: session.refresh_token
+      });
+      if (refreshed && refreshed.access_token) {
+        saveAuthSession(refreshed);
+      }
+    } catch (error) {
+      clearAuthSession();
+    }
+  }
+
   function supabaseHeaders() {
     var config = getConfig();
+    var accessToken = getAuthAccessToken();
     return {
       apikey: config.supabaseAnonKey,
-      Authorization: "Bearer " + config.supabaseAnonKey,
+      Authorization: "Bearer " + (accessToken || config.supabaseAnonKey),
       "Content-Type": "application/json"
     };
   }
@@ -432,6 +557,7 @@
       '    <button class="' + (activeGame === "lobby" ? "is-active" : "") + '" data-action="open-lobby" type="button">游戏大厅</button>',
       '    <button class="' + (activeGame === "qa" ? "is-active" : "") + '" data-action="open-qa" type="button">100 Q&As</button>',
       '    <button class="' + (activeGame === "tycoon" ? "is-active" : "") + '" data-action="open-tycoon" type="button">Friends Tycoon</button>',
+      '    <button class="' + (activeGame === "account" ? "is-active" : "") + '" data-action="open-account" type="button">' + escapeHtml(isLoggedIn() ? "我的记录" : "登录") + '</button>',
       '  </nav>',
       '</header>'
     ].join("");
@@ -887,11 +1013,11 @@
     var room = normalizeOnlineRoom(bundle);
     if (!room) return null;
 
-    if (identity && bundle.currentPlayerId) {
+    if (bundle.currentPlayerId) {
       saveIdentity(room, {
         playerId: bundle.currentPlayerId,
-        playerKey: identity.playerKey,
-        lastPage: identity.lastPage || 0
+        playerKey: identity && identity.playerKey ? identity.playerKey : null,
+        lastPage: identity && typeof identity.lastPage === "number" ? identity.lastPage : 0
       });
     }
 
@@ -911,10 +1037,10 @@
     var room = normalizeOnlineTycoonRoom(bundle);
     if (!room) return null;
 
-    if (identity && bundle.currentPlayerId) {
+    if (bundle.currentPlayerId) {
       saveTycoonIdentity(room, {
         playerId: bundle.currentPlayerId,
-        playerKey: identity.playerKey
+        playerKey: identity && identity.playerKey ? identity.playerKey : null
       });
     }
 
@@ -967,6 +1093,7 @@
 
   async function render(options) {
     options = options || {};
+    await ensureFreshAuthSession();
     var state = loadState();
     var parts = getHashParts();
     var pageName = parts[0] || "home";
@@ -976,6 +1103,19 @@
     }
 
     if (pageName === "qa") {
+      if (parts[1] === "export") {
+        if (isSupabaseMode() && !options.skipOnlineSync) {
+          try {
+            await syncOnlineRoom(parts[2]);
+            state = loadState();
+          } catch (error) {
+            showToast("线上房间同步失败，请检查 Supabase 配置。");
+          }
+        }
+        renderQaExportPage(state, parts[2]);
+        return;
+      }
+
       if (parts[1] === "room") {
         if (isSupabaseMode() && !options.skipOnlineSync) {
           try {
@@ -995,6 +1135,11 @@
       }
 
       renderQaHome(state);
+      return;
+    }
+
+    if (pageName === "account") {
+      await renderAccountPage();
       return;
     }
 
@@ -1063,6 +1208,214 @@
       '  </section>',
       '</main>'
     ].join(""), "lobby");
+  }
+
+  function localAccountRecords() {
+    var qaState = loadState();
+    var tycoonState = loadTycoonState();
+    return {
+      qa: Object.keys(qaState.rooms || {}).map(function (id) {
+        var room = qaState.rooms[id];
+        var player = getCurrentPlayer(room) || getRoomPlayers(room)[0] || null;
+        return {
+          roomCode: room.code,
+          nickname: player ? player.nickname : "本地玩家",
+          questionCount: getRoomQuestions(room).length,
+          submittedAt: player ? player.submittedAt : null,
+          answerCount: player ? answeredCount(player, room) : 0,
+          createdAt: room.createdAt
+        };
+      }),
+      tycoon: Object.keys(tycoonState.rooms || {}).map(function (id) {
+        var room = normalizeTycoonRoom(tycoonState.rooms[id]);
+        var player = getTycoonCurrentPlayer(room) || getTycoonPlayers(room)[0] || null;
+        return {
+          roomCode: room.code,
+          nickname: player ? player.nickname : "本地玩家",
+          status: room.status,
+          playerStatus: player ? player.status : "",
+          cash: player ? player.cash : 0,
+          isHost: player ? isTycoonHost(room, player) : false,
+          createdAt: room.createdAt
+        };
+      })
+    };
+  }
+
+  function collectDeviceBindingPayload() {
+    var qaState = loadState();
+    var qaPlayers = [];
+    var seenQa = {};
+    Object.keys(qaState.rooms || {}).forEach(function (id) {
+      var room = qaState.rooms[id];
+      var identity = getIdentity(room);
+      var playerId = getIdentityPlayerId(identity);
+      if (!identity || !identity.playerKey || !playerId) return;
+      var key = room.code + ":" + playerId;
+      if (seenQa[key]) return;
+      seenQa[key] = true;
+      qaPlayers.push({
+        roomCode: room.code,
+        playerId: playerId,
+        playerKey: identity.playerKey
+      });
+    });
+
+    var tycoonState = loadTycoonState();
+    var tycoonPlayers = [];
+    var seenTycoon = {};
+    Object.keys(tycoonState.rooms || {}).forEach(function (id) {
+      var room = tycoonState.rooms[id];
+      var identity = getTycoonIdentity(room);
+      var playerId = getTycoonIdentityPlayerId(identity);
+      if (!identity || !identity.playerKey || !playerId) return;
+      var key = room.code + ":" + playerId;
+      if (seenTycoon[key]) return;
+      seenTycoon[key] = true;
+      tycoonPlayers.push({
+        roomCode: room.code,
+        playerId: playerId,
+        playerKey: identity.playerKey
+      });
+    });
+
+    return {
+      qaPlayers: qaPlayers,
+      tycoonPlayers: tycoonPlayers
+    };
+  }
+
+  async function loadAccountRecords() {
+    if (!isSupabaseMode() || !isLoggedIn()) return localAccountRecords();
+    if (accountRecordsCache) return accountRecordsCache;
+    accountRecordsCache = await supabaseRpc("account_get_records", {});
+    return accountRecordsCache || { qa: [], tycoon: [] };
+  }
+
+  async function renderAccountPage() {
+    document.title = "我的记录 | Friends Games";
+
+    if (!isSupabaseMode()) {
+      renderShell([
+        '<main class="account-layout">',
+        '  <section class="panel account-panel">',
+        '    <p class="eyebrow">Account</p>',
+        '    <h1>本地模式记录</h1>',
+        '    <p class="muted">当前是本地测试模式，登录功能只在线上 Supabase 模式启用。</p>',
+        renderAccountRecordLists(localAccountRecords()),
+        '  </section>',
+        '</main>'
+      ].join(""), "account");
+      return;
+    }
+
+    if (!isLoggedIn()) {
+      renderShell([
+        '<main class="account-layout">',
+        '  <section class="panel account-panel">',
+        '    <p class="eyebrow">Account</p>',
+        '    <h1>登录或注册</h1>',
+        '    <p class="muted">第一版先启用邮箱 + 密码。手机号入口会保留，等短信服务配置好后再打开。</p>',
+        '    <div class="account-mode-row">',
+        '      <span class="small-status">邮箱可用</span>',
+        '      <span class="small-status is-muted">手机号稍后开放</span>',
+        '    </div>',
+        '    <form class="stack-form account-form" data-action="account-login">',
+        '      <label for="account-email">邮箱</label>',
+        '      <input id="account-email" name="email" type="email" autocomplete="email" placeholder="you@example.com">',
+        '      <label for="account-password">密码</label>',
+        '      <input id="account-password" name="password" type="password" autocomplete="current-password" minlength="6" placeholder="至少 6 位">',
+        '      <div class="dialog-actions">',
+        '        <button class="primary-button" type="submit">登录</button>',
+        '        <button class="secondary-button" data-action="account-register" type="button">注册新账号</button>',
+        '      </div>',
+        '    </form>',
+        '  </section>',
+        '</main>'
+      ].join(""), "account");
+      return;
+    }
+
+    var records;
+    try {
+      records = await loadAccountRecords();
+    } catch (error) {
+      records = { qa: [], tycoon: [] };
+      showToast("账号记录暂时读取失败，请确认已运行最新版 Supabase SQL。");
+    }
+
+    var bindingPayload = collectDeviceBindingPayload();
+    var bindCount = bindingPayload.qaPlayers.length + bindingPayload.tycoonPlayers.length;
+
+    renderShell([
+      '<main class="account-layout">',
+      '  <section class="panel account-panel">',
+      '    <p class="eyebrow">Account</p>',
+      '    <h1>我的记录</h1>',
+      '    <p class="muted">' + escapeHtml(accountLabel()) + '</p>',
+      '    <div class="dialog-actions">',
+      bindCount ? '      <button class="primary-button" data-action="account-bind-device" type="button">绑定这台设备里的 ' + bindCount + ' 条匿名记录</button>' : "",
+      '      <button class="secondary-button" data-action="account-refresh-records" type="button">刷新记录</button>',
+      '      <button class="ghost-button" data-action="account-logout" type="button">退出登录</button>',
+      '    </div>',
+      renderAccountRecordLists(records),
+      '  </section>',
+      '</main>'
+    ].join(""), "account");
+  }
+
+  function renderAccountRecordLists(records) {
+    records = records || { qa: [], tycoon: [] };
+    return [
+      '<section class="account-record-grid">',
+      '  <div class="account-record-section">',
+      '    <h2>100 Q&As</h2>',
+      renderQaAccountRecords(records.qa || []),
+      '  </div>',
+      '  <div class="account-record-section">',
+      '    <h2>Friends Tycoon</h2>',
+      renderTycoonAccountRecords(records.tycoon || []),
+      '  </div>',
+      '</section>'
+    ].join("");
+  }
+
+  function renderQaAccountRecords(records) {
+    if (!records.length) return '<p class="muted">还没有账号下的问答记录。</p>';
+    return [
+      '<div class="account-record-list">',
+      records.map(function (record) {
+        return [
+          '<article class="account-record-card">',
+          '  <div>',
+          '    <strong>Room ' + escapeHtml(record.roomCode || record.room_code) + '</strong>',
+          '    <p>' + escapeHtml(record.nickname || "未命名") + ' · ' + Number(record.questionCount || record.question_count || 0) + ' 题 · ' + (record.submittedAt || record.submitted_at ? "已提交" : "未提交") + '</p>',
+          '  </div>',
+          '  <button class="small-button" data-action="open-room" data-code="' + escapeHtml(record.roomCode || record.room_code) + '" type="button">进入</button>',
+          '</article>'
+        ].join("");
+      }).join(""),
+      '</div>'
+    ].join("");
+  }
+
+  function renderTycoonAccountRecords(records) {
+    if (!records.length) return '<p class="muted">还没有账号下的大富翁记录。</p>';
+    return [
+      '<div class="account-record-list">',
+      records.map(function (record) {
+        return [
+          '<article class="account-record-card">',
+          '  <div>',
+          '    <strong>Room ' + escapeHtml(record.roomCode || record.room_code) + '</strong>',
+          '    <p>' + escapeHtml(record.nickname || "未命名") + ' · ' + escapeHtml(tycoonStatusText(record.status)) + ' · ' + escapeHtml(tycoonPlayerStatusText(record.playerStatus || record.player_status)) + '</p>',
+          '  </div>',
+          '  <button class="small-button" data-action="open-tycoon-room" data-code="' + escapeHtml(record.roomCode || record.room_code) + '" type="button">进入</button>',
+          '</article>'
+        ].join("");
+      }).join(""),
+      '</div>'
+    ].join("");
   }
 
   function renderQaHome(state) {
@@ -1690,6 +2043,7 @@
       '    </div>',
       '    <div class="room-tools">',
       '      <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-link">↗</button>',
+      '      <button class="secondary-button" data-action="open-qa-export" data-code="' + escapeHtml(room.code) + '">导出 PDF</button>',
       '      <button class="secondary-button" data-action="new-local-player">' + (isSupabaseMode() ? "换个昵称加入" : "再加一位本地玩家") + '</button>',
       '    </div>',
       '  </header>',
@@ -1718,6 +2072,172 @@
       '  </section>',
       '</main>'
     ].join(""), "qa");
+  }
+
+  function renderQaExportPage(state, code) {
+    var room = getRoomByCode(state, code);
+    if (!room) {
+      renderMissingRoom(code);
+      return;
+    }
+
+    var player = getCurrentPlayer(room);
+    var roomQuestions = getRoomQuestions(room);
+    var submittedPlayers = getRoomPlayers(room).filter(function (item) {
+      return Boolean(item.submittedAt);
+    });
+
+    if (!player || !player.submittedAt) {
+      renderShell([
+        '<main class="narrow-layout">',
+        '  <section class="panel">',
+        '    <p class="eyebrow">PDF export</p>',
+        '    <h1>暂时不能导出</h1>',
+        '    <p class="muted">你需要先提交自己的答案，才能导出同一房间里已提交朋友的答案。</p>',
+        '    <button class="primary-button" data-action="open-room" data-code="' + escapeHtml(room.code) + '">回到房间</button>',
+        '  </section>',
+        '</main>'
+      ].join(""), "qa");
+      return;
+    }
+
+    document.title = "Room " + room.code + " PDF | 100 Q&As";
+    renderShell([
+      '<main class="pdf-export-layout">',
+      '  <section class="pdf-toolbar panel">',
+      '    <div>',
+      '      <p class="eyebrow">PDF export</p>',
+      '      <h1>100 Q&As 导出</h1>',
+      '      <p class="muted">Room ' + escapeHtml(room.code) + ' · ' + roomQuestions.length + ' 题 · ' + submittedPlayers.length + ' 位已提交玩家</p>',
+      '    </div>',
+      '    <div class="dialog-actions">',
+      '      <button class="secondary-button" data-action="open-room" data-code="' + escapeHtml(room.code) + '">返回结果页</button>',
+      '      <button class="primary-button" data-action="print-pdf">打印 / 保存 PDF</button>',
+      '    </div>',
+      '  </section>',
+      '  <article class="pdf-document">',
+      '    <header>',
+      '      <p>Room ' + escapeHtml(room.code) + '</p>',
+      '      <h1>100 Q&As</h1>',
+      '      <p>导出范围：所有已提交玩家的答案</p>',
+      '    </header>',
+      roomQuestions.map(function (question, index) {
+        var number = index + 1;
+        return [
+          '<section class="pdf-question">',
+          '  <h2>Q' + number + '. ' + escapeHtml(question) + '</h2>',
+          submittedPlayers.map(function (submittedPlayer) {
+            return [
+              '<div class="pdf-answer">',
+              '  <strong>' + escapeHtml(submittedPlayer.nickname) + '</strong>',
+              '  <p>' + escapeHtml(submittedPlayer.answers[String(number)] || "") + '</p>',
+              '</div>'
+            ].join("");
+          }).join(""),
+          '</section>'
+        ].join("");
+      }).join(""),
+      '  </article>',
+      '</main>'
+    ].join(""), "qa");
+  }
+
+  function authFriendlyError(error) {
+    var message = error && error.message ? error.message : "";
+    if (/invalid/i.test(message)) return "账号或密码不正确。";
+    if (/already/i.test(message) || /registered/i.test(message)) return "这个邮箱可能已经注册，可以直接登录。";
+    if (/password/i.test(message)) return "密码至少需要 6 位。";
+    return "账号操作失败，请稍后再试。";
+  }
+
+  async function loginAccount(email, password) {
+    var safeEmail = normalizeEmail(email);
+    if (!safeEmail || !password) {
+      showToast("请填写邮箱和密码。");
+      return;
+    }
+
+    try {
+      var result = await authRequest("/token?grant_type=password", {
+        email: safeEmail,
+        password: String(password || "")
+      });
+      var session = normalizeAuthSession(result);
+      saveAuthSession(session);
+      showToast("已登录。");
+      render();
+    } catch (error) {
+      showToast(authFriendlyError(error));
+    }
+  }
+
+  async function registerAccountFromForm(form) {
+    var formData = new FormData(form);
+    var safeEmail = normalizeEmail(formData.get("email"));
+    var password = String(formData.get("password") || "");
+    if (!safeEmail || !password) {
+      showToast("请填写邮箱和密码。");
+      return;
+    }
+
+    try {
+      var result = await authRequest("/signup", {
+        email: safeEmail,
+        password: password
+      });
+      var session = normalizeAuthSession(result);
+      if (session && session.access_token) {
+        saveAuthSession(session);
+        showToast("注册成功，已登录。");
+        render();
+      } else {
+        showToast("注册成功。若系统要求邮箱确认，请先到邮箱里确认后再登录。");
+      }
+    } catch (error) {
+      showToast(authFriendlyError(error));
+    }
+  }
+
+  async function logoutAccount() {
+    var token = getAuthAccessToken();
+    try {
+      if (token) {
+        await authRequest("/logout", null, {
+          accessToken: token
+        });
+      }
+    } catch (error) {
+      // Local sign-out should still clear the session if the remote logout call fails.
+    }
+    clearAuthSession();
+    showToast("已退出登录。");
+    render();
+  }
+
+  async function bindDeviceRecordsToAccount() {
+    if (!isLoggedIn()) {
+      showToast("请先登录账号。");
+      return;
+    }
+
+    var payload = collectDeviceBindingPayload();
+    var total = payload.qaPlayers.length + payload.tycoonPlayers.length;
+    if (!total) {
+      showToast("这台设备里没有可绑定的匿名记录。");
+      return;
+    }
+
+    try {
+      var result = await supabaseRpc("account_bind_records", {
+        p_qa_players: payload.qaPlayers,
+        p_tycoon_players: payload.tycoonPlayers
+      });
+      accountRecordsCache = null;
+      showToast("已绑定 " + (Number(result && result.qaBound || 0) + Number(result && result.tycoonBound || 0)) + " 条记录。");
+      render();
+    } catch (error) {
+      showToast("绑定失败，请确认已运行最新版 Supabase SQL。");
+    }
   }
 
   async function createRoom(roomQuestions) {
@@ -1908,7 +2428,7 @@
     if (!isSupabaseMode()) return;
 
     var identity = getIdentity(room);
-    if (!identity || !identity.playerKey || getIdentityPlayerId(identity) !== player.id) return;
+    if (!identity || getIdentityPlayerId(identity) !== player.id) return;
 
     var key = room.code + ":" + player.id + ":" + questionNumber;
     window.clearTimeout(remoteAnswerTimers[key]);
@@ -1923,7 +2443,7 @@
       supabaseRpc("qa_save_answer", {
         p_room_code: room.code,
         p_player_id: player.id,
-        p_player_key: identity.playerKey,
+        p_player_key: identity.playerKey || null,
         p_question_index: Number(questionNumber),
         p_content: content
       }).catch(function () {
@@ -2010,7 +2530,7 @@
 
     if (isSupabaseMode()) {
       var identity = getIdentity(room);
-      if (!identity || !identity.playerKey || getIdentityPlayerId(identity) !== player.id) {
+      if (!identity || getIdentityPlayerId(identity) !== player.id) {
         showToast("无法确认当前玩家身份，请重新加入房间。");
         return;
       }
@@ -2020,7 +2540,7 @@
         var bundle = await supabaseRpc("qa_submit_player", {
           p_room_code: room.code,
           p_player_id: player.id,
-          p_player_key: identity.playerKey,
+          p_player_key: identity.playerKey || null,
           p_answers: player.answers
         });
         var onlineRoom = normalizeOnlineRoom(bundle);
@@ -2618,10 +3138,12 @@
     if (action === "open-lobby") setRoute("home");
     if (action === "open-qa") setRoute("qa");
     if (action === "open-tycoon") setRoute("tycoon");
+    if (action === "open-account") setRoute("account");
     if (action === "open-create-room") setRoute("qa/create");
     if (action === "set-question-mode") setQuestionMode(target.getAttribute("data-mode"));
     if (action === "go-home") setRoute("home");
     if (action === "open-room") setRoute("qa/room/" + target.getAttribute("data-code"));
+    if (action === "open-qa-export") setRoute("qa/export/" + target.getAttribute("data-code"));
     if (action === "open-tycoon-room") setRoute("tycoon/room/" + target.getAttribute("data-code"));
     if (action === "prev-page") changePage(-1);
     if (action === "next-page") changePage(1);
@@ -2654,6 +3176,14 @@
     }
     if (action === "new-local-tycoon-player") clearCurrentTycoonPlayer();
     if (action === "switch-tycoon-player") switchTycoonPlayer(target.getAttribute("data-player-id"));
+    if (action === "account-register") registerAccountFromForm(target.closest("form"));
+    if (action === "account-logout") logoutAccount();
+    if (action === "account-bind-device") bindDeviceRecordsToAccount();
+    if (action === "account-refresh-records") {
+      accountRecordsCache = null;
+      render();
+    }
+    if (action === "print-pdf") window.print();
   });
 
   document.addEventListener("keydown", function (event) {
@@ -2680,6 +3210,14 @@
 
     if (action === "create-room") {
       submitCreateRoom();
+    }
+
+    if (action === "account-login") {
+      var accountData = new FormData(form);
+      loginAccount(
+        String(accountData.get("email") || ""),
+        String(accountData.get("password") || "")
+      );
     }
 
     if (action === "tycoon-create-room") {

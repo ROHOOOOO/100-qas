@@ -184,6 +184,16 @@ try {
   assert(await page.getByText("测试答案 3").count() === 1, "Result page should include answer 3.");
   assert(await page.getByText("你的答案已经锁定").count() === 1, "Result page should show the locked-answer status.");
 
+  await page.getByRole("button", { name: "导出 PDF" }).click();
+  await page.waitForURL(/#qa\/export\//);
+  await page.getByRole("heading", { name: "100 Q&As 导出" }).waitFor();
+  await page.getByRole("button", { name: "打印 / 保存 PDF" }).waitFor();
+  assert(await page.locator(".pdf-question").count() === 3, "PDF export should show the 3 custom questions.");
+  assert(await page.locator(".pdf-answer").count() === 3, "PDF export should include only submitted player answers.");
+  assert(await page.getByText("导出范围：所有已提交玩家的答案").count() === 1, "PDF export should state its export scope.");
+  await page.getByRole("button", { name: "返回结果页" }).click();
+  await page.getByRole("heading", { name: "大家的答案" }).waitFor();
+
   await page.getByRole("button", { name: "再加一位本地玩家" }).click();
   await page.getByRole("heading", { name: "加入这局 100 Q&As" }).waitFor();
   assert(await page.locator(".player-row").count() === 1, "Join page should show the submitted local player.");
@@ -235,6 +245,12 @@ try {
   assert(stateSummary.question3 === "自定义问题 3?", "Room should persist its shorter custom question bank.");
   assert(!stateSummary.secondSubmitted, "Second player should remain unsubmitted.");
   assert(stateSummary.secondAnswerCount === 0, "Second player should have no saved answers in this scenario.");
+
+  await page.getByRole("button", { name: "登录" }).click();
+  await page.getByRole("heading", { name: "本地模式记录" }).waitFor();
+  assert(await page.locator(".account-record-card").count() >= 2, "Local account page should list local QA and Tycoon records.");
+  assert(await page.getByText("100 Q&As").count() >= 1, "Account page should include 100 Q&As records.");
+  assert(await page.getByText("Friends Tycoon").count() >= 1, "Account page should include Friends Tycoon records.");
 
   await page.goto(`${appUrl}#room/${stateSummary.roomCode}`);
   await page.getByRole("heading", { name: "大家的答案" }).waitFor();

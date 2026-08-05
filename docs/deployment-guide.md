@@ -36,6 +36,8 @@
 - Friends Games 线上验收已通过，最新 100 Q&As 测试房间 `6E22A5` 中 2 位玩家均提交 3 题，结果页正常展示 6 条答案。
 - Friends Tycoon 线上双玩家验收已通过，测试房间 `5D1C74` 跑通创建、加入、聊天、开始、掷骰、结束回合、退出即破产、重新进入恢复和最终结果。
 - 最新 `supabase/schema.sql` 额外加入“已结束/已解散房间不能再退出”的后端保护；线上页面已先隐藏该入口，方便时可再次运行 SQL 让数据库层同步这条保护。
+- 账号登录/注册、我的记录、匿名记录绑定和 100 Q&As PDF 导出已完成本地开发与本地自动化验收。
+- 账号功能需要再次运行最新版 `supabase/schema.sql` 后发布到 GitHub Pages，再做线上验收。
 
 ## 使用流程
 
@@ -115,12 +117,30 @@ supabase/schema.sql
 - `tycoon_restart_room`
 - `tycoon_close_room`
 - `tycoon_send_message`
+- `account_bind_records`
+- `account_get_records`
 
 网页通过这些函数读写数据，不直接开放数据表。
 
 如果后续更新了 `supabase/schema.sql`，可以在 SQL Editor 中再次运行整个文件。该文件会兼容已有表和已有房间。
 
-### 3. 配置网页
+### 3. 检查 Supabase Auth
+
+账号第一版使用邮箱 + 密码。
+
+Supabase 后台位置：
+
+```text
+Authentication → Providers → Email
+```
+
+需要确认：
+
+- Email provider 已启用。
+- 是否要求邮箱确认由房主决定：如果开启邮箱确认，朋友注册后需要先去邮箱点击确认，再登录。
+- 手机号登录第一版暂不启用；等短信服务配置完成后再开放。
+
+### 4. 配置网页
 
 编辑：
 

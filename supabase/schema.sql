@@ -11,6 +11,9 @@ create table if not exists public.qa_rooms (
 alter table public.qa_rooms
 add column if not exists questions jsonb not null default '[]'::jsonb;
 
+alter table public.qa_rooms
+add column if not exists owner_account_id uuid references auth.users(id) on delete set null;
+
 do $$
 begin
   if not exists (
@@ -34,6 +37,9 @@ create table if not exists public.qa_players (
   unique (room_id, player_key)
 );
 
+alter table public.qa_players
+add column if not exists account_id uuid references auth.users(id) on delete set null;
+
 create table if not exists public.qa_answers (
   room_id uuid not null references public.qa_rooms(id) on delete cascade,
   player_id uuid not null references public.qa_players(id) on delete cascade,
@@ -43,6 +49,9 @@ create table if not exists public.qa_answers (
   primary key (player_id, question_index)
 );
 
+create index if not exists qa_rooms_owner_account_id_idx on public.qa_rooms (owner_account_id);
+create index if not exists qa_players_account_id_idx on public.qa_players (account_id);
+
 alter table public.qa_rooms enable row level security;
 alter table public.qa_players enable row level security;
 alter table public.qa_answers enable row level security;
@@ -50,7 +59,7 @@ alter table public.qa_answers enable row level security;
 revoke all on public.qa_rooms from anon, authenticated;
 revoke all on public.qa_players from anon, authenticated;
 revoke all on public.qa_answers from anon, authenticated;
-grant usage on schema public to anon;
+grant usage on schema public to anon, authenticated;
 
 create or replace function public.qa_room_bundle(
   p_room_code text,
@@ -65,6 +74,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_current public.qa_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_has_current boolean := false;
   v_can_view_results boolean := false;
 begin
@@ -77,13 +87,29 @@ begin
     return null;
   end if;
 
-  if p_player_id is not null and p_player_key is not null then
+  if p_player_id is not null and (p_player_key is not null or v_account_id is not null) then
     select *
       into v_current
       from public.qa_players
      where id = p_player_id
        and room_id = v_room.id
-       and player_key = p_player_key;
+       and (
+         (p_player_key is not null and player_key = p_player_key)
+         or (v_account_id is not null and account_id = v_account_id)
+       );
+
+    v_has_current := found;
+    v_can_view_results := v_has_current and v_current.submitted_at is not null;
+  end if;
+
+  if not v_has_current and v_account_id is not null then
+    select *
+      into v_current
+      from public.qa_players
+     where room_id = v_room.id
+       and account_id = v_account_id
+     order by created_at
+     limit 1;
 
     v_has_current := found;
     v_can_view_results := v_has_current and v_current.submitted_at is not null;
@@ -199,8 +225,8 @@ begin
     v_attempts := v_attempts + 1;
 
     begin
-      insert into public.qa_rooms (code, questions)
-      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6), v_questions)
+      insert into public.qa_rooms (code, questions, owner_account_id)
+      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6), v_questions, auth.uid())
       returning *
       into v_room;
 
@@ -245,6 +271,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_nickname text;
 begin
   v_nickname := left(btrim(p_nickname), 20);
@@ -262,10 +289,32 @@ begin
     raise exception 'Room not found.';
   end if;
 
-  insert into public.qa_players (room_id, nickname, player_key)
-  values (v_room.id, v_nickname, p_player_key)
+  if v_account_id is not null then
+    select *
+      into v_player
+      from public.qa_players
+     where room_id = v_room.id
+       and account_id = v_account_id
+     order by created_at
+     limit 1;
+
+    if found then
+      update public.qa_players
+         set nickname = v_nickname
+       where id = v_player.id
+       returning *
+       into v_player;
+
+      return public.qa_room_bundle(v_room.code, v_player.id, null);
+    end if;
+  end if;
+
+  insert into public.qa_players (room_id, nickname, player_key, account_id)
+  values (v_room.id, v_nickname, p_player_key, v_account_id)
   on conflict (room_id, player_key)
-  do update set nickname = excluded.nickname
+  do update set
+    nickname = excluded.nickname,
+    account_id = coalesce(public.qa_players.account_id, excluded.account_id)
   returning *
   into v_player;
 
@@ -288,6 +337,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_required_count integer;
 begin
   select *
@@ -304,7 +354,10 @@ begin
     from public.qa_players
    where id = p_player_id
      and room_id = v_room.id
-     and player_key = p_player_key;
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found then
     raise exception 'Player not found.';
@@ -348,6 +401,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_required_count integer;
   v_answer_count integer;
   v_item record;
@@ -366,7 +420,10 @@ begin
     from public.qa_players
    where id = p_player_id
      and room_id = v_room.id
-     and player_key = p_player_key;
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found then
     raise exception 'Player not found.';
@@ -415,11 +472,11 @@ begin
 end;
 $$;
 
-grant execute on function public.qa_create_room(jsonb) to anon;
-grant execute on function public.qa_get_room(text, uuid, text) to anon;
-grant execute on function public.qa_join_room(text, text, text) to anon;
-grant execute on function public.qa_save_answer(text, uuid, text, integer, text) to anon;
-grant execute on function public.qa_submit_player(text, uuid, text, jsonb) to anon;
+grant execute on function public.qa_create_room(jsonb) to anon, authenticated;
+grant execute on function public.qa_get_room(text, uuid, text) to anon, authenticated;
+grant execute on function public.qa_join_room(text, text, text) to anon, authenticated;
+grant execute on function public.qa_save_answer(text, uuid, text, integer, text) to anon, authenticated;
+grant execute on function public.qa_submit_player(text, uuid, text, jsonb) to anon, authenticated;
 
 create or replace function public.tycoon_default_map()
 returns jsonb
@@ -494,6 +551,12 @@ create table if not exists public.tycoon_players (
   unique (room_id, player_key)
 );
 
+alter table public.tycoon_rooms
+add column if not exists owner_account_id uuid references auth.users(id) on delete set null;
+
+alter table public.tycoon_players
+add column if not exists account_id uuid references auth.users(id) on delete set null;
+
 create table if not exists public.tycoon_properties (
   room_id uuid not null references public.tycoon_rooms(id) on delete cascade,
   cell_index integer not null check (cell_index between 0 and 31),
@@ -520,6 +583,8 @@ create table if not exists public.tycoon_messages (
 );
 
 create index if not exists tycoon_players_room_id_idx on public.tycoon_players (room_id);
+create index if not exists tycoon_rooms_owner_account_id_idx on public.tycoon_rooms (owner_account_id);
+create index if not exists tycoon_players_account_id_idx on public.tycoon_players (account_id);
 create index if not exists tycoon_properties_room_id_idx on public.tycoon_properties (room_id);
 create index if not exists tycoon_properties_owner_player_id_idx on public.tycoon_properties (owner_player_id);
 create index if not exists tycoon_logs_room_id_created_at_idx on public.tycoon_logs (room_id, created_at desc);
@@ -566,6 +631,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_current public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_has_current boolean := false;
 begin
   select *
@@ -577,13 +643,28 @@ begin
     return null;
   end if;
 
-  if p_player_id is not null and p_player_key is not null then
+  if p_player_id is not null and (p_player_key is not null or v_account_id is not null) then
     select *
       into v_current
       from public.tycoon_players
      where id = p_player_id
        and room_id = v_room.id
-       and player_key = p_player_key;
+       and (
+         (p_player_key is not null and player_key = p_player_key)
+         or (v_account_id is not null and account_id = v_account_id)
+       );
+
+    v_has_current := found;
+  end if;
+
+  if not v_has_current and v_account_id is not null then
+    select *
+      into v_current
+      from public.tycoon_players
+     where room_id = v_room.id
+       and account_id = v_account_id
+     order by created_at
+     limit 1;
 
     v_has_current := found;
   end if;
@@ -965,6 +1046,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_code text;
   v_attempts integer := 0;
   v_nickname text;
@@ -979,8 +1061,8 @@ begin
     v_code := substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6);
 
     begin
-      insert into public.tycoon_rooms (code, victory_mode, turn_limit, map)
-      values (v_code, case when p_victory_mode = 'turnLimit' then 'turnLimit' else 'survivor' end, least(greatest(coalesce(p_turn_limit, 30), 10), 60), public.tycoon_default_map())
+      insert into public.tycoon_rooms (code, victory_mode, turn_limit, map, owner_account_id)
+      values (v_code, case when p_victory_mode = 'turnLimit' then 'turnLimit' else 'survivor' end, least(greatest(coalesce(p_turn_limit, 30), 10), 60), public.tycoon_default_map(), v_account_id)
       returning *
       into v_room;
 
@@ -993,8 +1075,8 @@ begin
     end;
   end loop;
 
-  insert into public.tycoon_players (room_id, nickname, player_key)
-  values (v_room.id, v_nickname, p_player_key)
+  insert into public.tycoon_players (room_id, nickname, player_key, account_id)
+  values (v_room.id, v_nickname, p_player_key, v_account_id)
   returning *
   into v_player;
 
@@ -1045,6 +1127,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_nickname text;
   v_player_count integer;
 begin
@@ -1077,10 +1160,34 @@ begin
     raise exception 'Room is full.';
   end if;
 
-  insert into public.tycoon_players (room_id, nickname, player_key)
-  values (v_room.id, v_nickname, p_player_key)
+  if v_account_id is not null then
+    select *
+      into v_player
+      from public.tycoon_players
+     where room_id = v_room.id
+       and account_id = v_account_id
+     order by created_at
+     limit 1;
+
+    if found then
+      update public.tycoon_players
+         set nickname = v_nickname,
+             updated_at = now()
+       where id = v_player.id
+       returning *
+       into v_player;
+
+      return public.tycoon_room_bundle(v_room.code, v_player.id, null);
+    end if;
+  end if;
+
+  insert into public.tycoon_players (room_id, nickname, player_key, account_id)
+  values (v_room.id, v_nickname, p_player_key, v_account_id)
   on conflict (room_id, player_key)
-  do update set nickname = excluded.nickname, updated_at = now()
+  do update set
+    nickname = excluded.nickname,
+    account_id = coalesce(public.tycoon_players.account_id, excluded.account_id),
+    updated_at = now()
   returning *
   into v_player;
 
@@ -1103,6 +1210,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_first_player_id uuid;
   v_player_count integer;
 begin
@@ -1117,7 +1225,10 @@ begin
     from public.tycoon_players
    where id = p_player_id
      and room_id = v_room.id
-     and player_key = p_player_key;
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found or v_room.host_player_id <> v_player.id then
     raise exception 'Only host can start.';
@@ -1186,6 +1297,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_cell jsonb;
   v_property public.tycoon_properties%rowtype;
   v_owner public.tycoon_players%rowtype;
@@ -1206,7 +1318,10 @@ begin
     from public.tycoon_players
    where id = p_player_id
      and room_id = v_room.id
-     and player_key = p_player_key
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     )
    for update;
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'roll' or v_player.status <> 'active' then
@@ -1307,12 +1422,21 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_property public.tycoon_properties%rowtype;
   v_cell jsonb;
   v_price integer;
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key for update;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     )
+   for update;
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
     raise exception 'Cannot buy now.';
@@ -1354,12 +1478,21 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_property public.tycoon_properties%rowtype;
   v_cell jsonb;
   v_cost integer;
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key for update;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     )
+   for update;
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
     raise exception 'Cannot upgrade now.';
@@ -1397,9 +1530,17 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
     raise exception 'Cannot end turn now.';
@@ -1423,10 +1564,19 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_was_current boolean;
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key for update;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     )
+   for update;
 
   if not found then
     raise exception 'Player not found.';
@@ -1462,9 +1612,17 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found or v_room.host_player_id <> v_player.id then
     raise exception 'Only host can restart.';
@@ -1513,9 +1671,17 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found or v_room.host_player_id <> v_player.id then
     raise exception 'Only host can close.';
@@ -1549,6 +1715,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := auth.uid();
   v_content text;
 begin
   v_content := left(btrim(p_content), 180);
@@ -1557,7 +1724,14 @@ begin
   end if;
 
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code));
-  select * into v_player from public.tycoon_players where id = p_player_id and room_id = v_room.id and player_key = p_player_key;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
 
   if not found or v_room.status in ('finished', 'closed') or v_player.status = 'bankrupt' then
     raise exception 'Cannot chat now.';
@@ -1580,6 +1754,187 @@ begin
 end;
 $$;
 
+create or replace function public.account_bind_records(
+  p_qa_players jsonb default '[]'::jsonb,
+  p_tycoon_players jsonb default '[]'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_account_id uuid := auth.uid();
+  v_item jsonb;
+  v_player_id uuid;
+  v_room_code text;
+  v_player_key text;
+  v_rows integer;
+  v_qa_bound integer := 0;
+  v_tycoon_bound integer := 0;
+begin
+  if v_account_id is null then
+    raise exception 'Login required.';
+  end if;
+
+  if jsonb_typeof(coalesce(p_qa_players, '[]'::jsonb)) <> 'array'
+     or jsonb_typeof(coalesce(p_tycoon_players, '[]'::jsonb)) <> 'array' then
+    raise exception 'Binding payload must be arrays.';
+  end if;
+
+  for v_item in
+    select value
+      from jsonb_array_elements(coalesce(p_qa_players, '[]'::jsonb))
+  loop
+    begin
+      v_player_id := nullif(coalesce(v_item ->> 'playerId', v_item ->> 'player_id'), '')::uuid;
+    exception
+      when invalid_text_representation then
+        continue;
+    end;
+
+    v_room_code := upper(btrim(coalesce(v_item ->> 'roomCode', v_item ->> 'room_code', '')));
+    v_player_key := btrim(coalesce(v_item ->> 'playerKey', v_item ->> 'player_key', ''));
+
+    if v_player_id is null or v_room_code = '' or v_player_key = '' then
+      continue;
+    end if;
+
+    update public.qa_players p
+       set account_id = v_account_id
+      from public.qa_rooms r
+     where p.id = v_player_id
+       and p.room_id = r.id
+       and r.code = v_room_code
+       and p.player_key = v_player_key
+       and (p.account_id is null or p.account_id = v_account_id);
+
+    get diagnostics v_rows = row_count;
+    v_qa_bound := v_qa_bound + v_rows;
+  end loop;
+
+  for v_item in
+    select value
+      from jsonb_array_elements(coalesce(p_tycoon_players, '[]'::jsonb))
+  loop
+    begin
+      v_player_id := nullif(coalesce(v_item ->> 'playerId', v_item ->> 'player_id'), '')::uuid;
+    exception
+      when invalid_text_representation then
+        continue;
+    end;
+
+    v_room_code := upper(btrim(coalesce(v_item ->> 'roomCode', v_item ->> 'room_code', '')));
+    v_player_key := btrim(coalesce(v_item ->> 'playerKey', v_item ->> 'player_key', ''));
+
+    if v_player_id is null or v_room_code = '' or v_player_key = '' then
+      continue;
+    end if;
+
+    update public.tycoon_players p
+       set account_id = v_account_id,
+           updated_at = now()
+      from public.tycoon_rooms r
+     where p.id = v_player_id
+       and p.room_id = r.id
+       and r.code = v_room_code
+       and p.player_key = v_player_key
+       and (p.account_id is null or p.account_id = v_account_id);
+
+    get diagnostics v_rows = row_count;
+    v_tycoon_bound := v_tycoon_bound + v_rows;
+  end loop;
+
+  return jsonb_build_object(
+    'qaBound', v_qa_bound,
+    'tycoonBound', v_tycoon_bound
+  );
+end;
+$$;
+
+create or replace function public.account_get_records()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_account_id uuid := auth.uid();
+begin
+  if v_account_id is null then
+    raise exception 'Login required.';
+  end if;
+
+  return jsonb_build_object(
+    'qa', coalesce((
+      select jsonb_agg(qa_rows.item order by qa_rows.sort_at desc)
+        from (
+          select
+            greatest(coalesce(p.submitted_at, p.created_at), r.created_at) as sort_at,
+            jsonb_build_object(
+              'roomId', r.id,
+              'roomCode', r.code,
+              'playerId', p.id,
+              'nickname', p.nickname,
+              'questionCount', case
+                when jsonb_typeof(r.questions) = 'array'
+                 and jsonb_array_length(r.questions) between 1 and 100
+                then jsonb_array_length(r.questions)
+                else 100
+              end,
+              'submittedAt', p.submitted_at,
+              'answerCount', (
+                select count(*)
+                  from public.qa_answers a
+                 where a.player_id = p.id
+                   and btrim(a.content) <> ''
+              ),
+              'createdAt', r.created_at,
+              'joinedAt', p.created_at
+            ) as item
+          from public.qa_players p
+          join public.qa_rooms r on r.id = p.room_id
+          where p.account_id = v_account_id
+          order by greatest(coalesce(p.submitted_at, p.created_at), r.created_at) desc
+          limit 80
+        ) qa_rows
+    ), '[]'::jsonb),
+    'tycoon', coalesce((
+      select jsonb_agg(tycoon_rows.item order by tycoon_rows.sort_at desc)
+        from (
+          select
+            greatest(r.updated_at, p.updated_at, p.created_at) as sort_at,
+            jsonb_build_object(
+              'roomId', r.id,
+              'roomCode', r.code,
+              'playerId', p.id,
+              'nickname', p.nickname,
+              'status', r.status,
+              'playerStatus', p.status,
+              'cash', p.cash,
+              'isHost', r.host_player_id = p.id,
+              'victoryMode', r.victory_mode,
+              'currentTurn', r.current_turn,
+              'finalWinner', r.final_results ->> 'winnerName',
+              'createdAt', r.created_at,
+              'joinedAt', p.created_at
+            ) as item
+          from public.tycoon_players p
+          join public.tycoon_rooms r on r.id = p.room_id
+          where p.account_id = v_account_id
+          order by greatest(r.updated_at, p.updated_at, p.created_at) desc
+          limit 80
+        ) tycoon_rows
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+revoke execute on function public.account_bind_records(jsonb, jsonb) from public, anon, authenticated;
+revoke execute on function public.account_get_records() from public, anon, authenticated;
+grant execute on function public.account_bind_records(jsonb, jsonb) to authenticated;
+grant execute on function public.account_get_records() to authenticated;
+
 revoke execute on function public.tycoon_default_map() from public, anon, authenticated;
 revoke execute on function public.tycoon_add_log(uuid, text, text) from public, anon, authenticated;
 revoke execute on function public.tycoon_room_bundle(text, uuid, text) from public, anon, authenticated;
@@ -1588,15 +1943,15 @@ revoke execute on function public.tycoon_finish_if_needed(uuid) from public, ano
 revoke execute on function public.tycoon_bankrupt_player(uuid, uuid, text) from public, anon, authenticated;
 revoke execute on function public.tycoon_advance_turn(uuid, uuid) from public, anon, authenticated;
 
-grant execute on function public.tycoon_create_room(text, text, text, integer) to anon;
-grant execute on function public.tycoon_get_room(text, uuid, text) to anon;
-grant execute on function public.tycoon_join_room(text, text, text) to anon;
-grant execute on function public.tycoon_start_game(text, uuid, text) to anon;
-grant execute on function public.tycoon_roll_dice(text, uuid, text) to anon;
-grant execute on function public.tycoon_buy_property(text, uuid, text) to anon;
-grant execute on function public.tycoon_upgrade_property(text, uuid, text) to anon;
-grant execute on function public.tycoon_end_turn(text, uuid, text) to anon;
-grant execute on function public.tycoon_exit_game(text, uuid, text) to anon;
-grant execute on function public.tycoon_restart_room(text, uuid, text) to anon;
-grant execute on function public.tycoon_close_room(text, uuid, text) to anon;
-grant execute on function public.tycoon_send_message(text, uuid, text, text) to anon;
+grant execute on function public.tycoon_create_room(text, text, text, integer) to anon, authenticated;
+grant execute on function public.tycoon_get_room(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_join_room(text, text, text) to anon, authenticated;
+grant execute on function public.tycoon_start_game(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_roll_dice(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_buy_property(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_upgrade_property(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_end_turn(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_exit_game(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_restart_room(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_close_room(text, uuid, text) to anon, authenticated;
+grant execute on function public.tycoon_send_message(text, uuid, text, text) to anon, authenticated;

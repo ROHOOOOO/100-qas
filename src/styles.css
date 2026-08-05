@@ -1117,6 +1117,174 @@ textarea:focus {
   white-space: pre-wrap;
 }
 
+.account-layout {
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 34px 0 60px;
+}
+
+.account-panel {
+  width: 100%;
+}
+
+.account-panel h1,
+.pdf-toolbar h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(2.1rem, 6vw, 3.5rem);
+  line-height: 1.05;
+}
+
+.account-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.small-status.is-muted {
+  background: #f4f1ee;
+  color: #8a817a;
+}
+
+.account-form {
+  margin-top: 8px;
+}
+
+.account-record-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 26px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.account-record-section {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.account-record-section h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.account-record-list {
+  display: grid;
+  gap: 10px;
+}
+
+.account-record-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.account-record-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.account-record-card strong,
+.account-record-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-record-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.pdf-export-layout {
+  display: grid;
+  gap: 20px;
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 60px;
+}
+
+.pdf-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  width: 100%;
+  padding: 22px;
+  box-shadow: 0 12px 28px rgba(39, 58, 52, 0.08);
+}
+
+.pdf-document {
+  display: grid;
+  gap: 22px;
+  padding: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.pdf-document header {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.pdf-document header h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  line-height: 1.05;
+}
+
+.pdf-document header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pdf-question {
+  display: grid;
+  gap: 12px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pdf-question h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.pdf-answer {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--mint);
+  background: #f5fbf9;
+}
+
+.pdf-answer strong {
+  font-size: 0.9rem;
+}
+
+.pdf-answer p {
+  margin: 0;
+  color: #33443f;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1308,5 +1476,66 @@ textarea:focus {
 
   .panel {
     padding: 22px;
+  }
+
+  .account-record-grid,
+  .pdf-toolbar,
+  .account-record-card {
+    grid-template-columns: 1fr;
+  }
+
+  .account-record-card .small-button {
+    width: 100%;
+  }
+
+  .pdf-document {
+    padding: 22px;
+  }
+}
+
+@media print {
+  :root {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-soft: #ffffff;
+    --ink: #111111;
+    --muted: #555555;
+    --line: #d5d5d5;
+    --shadow: none;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .site-nav,
+  .pdf-toolbar,
+  .toast,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  .app-shell,
+  .pdf-export-layout {
+    width: 100%;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  .pdf-document {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .pdf-question {
+    margin-top: 18px;
+  }
+
+  .pdf-answer {
+    background: #ffffff;
   }
 }

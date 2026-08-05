@@ -14,9 +14,11 @@
 - `#qa`：100 Q&As 首页。
 - `#qa/create`：100 Q&As 创建房间。
 - `#qa/room/:code`：100 Q&As 房间。
+- `#qa/export/:code`：100 Q&As PDF 导出版。
 - `#room/:code`：旧版 100 Q&As 房间兼容路由。
 - `#tycoon`：Friends Tycoon 创建/加入入口。
 - `#tycoon/room/:code`：Friends Tycoon 房间。
+- `#account`：登录、注册、我的记录。
 
 ## 开发阶段策略
 
@@ -47,7 +49,7 @@
 - 接入线上数据库。
 - 支持不同设备加入同一房间。
 - 支持真实邀请链接。
-- 保持无账号体验。
+- 保持匿名可玩，同时支持登录账号跨设备同步记录。
 - 支持房间级题库：每个房间创建时绑定自己的题库；默认 100 题，自定义 1 到 100 题。
 
 当前推荐技术：
@@ -62,6 +64,7 @@
 - 为了马上可用，当前不引入 React / Next.js。
 - 静态网页可以直接部署到 GitHub Pages。
 - Supabase 负责在线保存房间、玩家和答案。
+- Supabase Auth 负责邮箱 + 密码账号。
 - 没有 Supabase 配置时，网页自动使用本地模式。
 
 ### 阶段 3：Friends Games 多游戏底座
@@ -134,7 +137,8 @@ supabase/schema.sql
 - `id`: 玩家唯一 ID。
 - `room_id`: 所属房间 ID。
 - `nickname`: 玩家昵称。
-- `player_key_hash`: 玩家身份密钥哈希。
+- `player_key`: 匿名身份密钥，当前版本仍以原始 key 存储；账号绑定后，新设备可通过账号找回身份。
+- `account_id`: 登录账号 ID，关联 Supabase Auth 用户。
 - `created_at`: 加入时间。
 - `submitted_at`: 提交时间，未提交为空。
 
@@ -161,7 +165,7 @@ supabase/schema.sql
 Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 
 - `tycoon_rooms`：房间、房主、状态、胜利条件、回合上限、地图配置、最终结果。
-- `tycoon_players`：玩家昵称、身份密钥哈希、现金、位置、是否破产、是否房主。
+- `tycoon_players`：玩家昵称、身份密钥、账号 ID、现金、位置、是否破产、是否房主。
 - `tycoon_properties`：房间内地产归属、等级、价格、租金。
 - `tycoon_logs`：游戏记录，保留关键行动。
 - `tycoon_messages`：聊天消息，可设置较短保留周期或只保留当前局。
@@ -192,6 +196,7 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 - 掷骰、买地、升级、结算租金和破产应放在同一个 RPC 事务中。
 - 客户端先定时刷新房间状态；如后续需要更顺滑体验，再接 Supabase Realtime。
 - 玩家身份仍采用 `player_key`：浏览器保存原始 key，服务端通过 `room_id + player_id + player_key` 校验操作权限。
+- 登录账号后，服务端也允许通过 `account_id = auth.uid()` 找回同一玩家身份。
 - 玩家刷新、关闭页面或闪退后，同一浏览器可通过本地身份 key 恢复到原玩家状态。
 - 玩家主动退出会调用 `tycoon_exit_game`，服务端将其置为 `bankrupt`，释放其地产并在必要时推进回合。
 - 游戏结束后 `tycoon_messages` 会清空，`tycoon_rooms.final_results` 与 `tycoon_logs` 保留最终结果和关键记录。
@@ -204,6 +209,44 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 - 结果页只展示已提交玩家的答案。
 - 房间不公开索引，只有拿到链接或房间码的人可以进入。
 - 客户端只能通过 RPC 创建房间、加入房间、保存答案和提交答案，不直接开放表访问。
+- 登录账号后，RPC 使用 Supabase Auth access token 调用，服务端通过 `auth.uid()` 绑定和查询记录。
+- 匿名模式继续使用 anon key 与本地保存的 `player_key`。
+
+## 账号与记录同步
+
+账号第一版使用 Supabase Auth：
+
+- 邮箱 + 密码可用。
+- 手机号 + 密码入口预留，待短信服务配置后启用。
+- 浏览器本地保存 Supabase Auth session。
+- `supabaseRpc` 在登录后使用用户 access token 调用 RPC；未登录时继续使用 anon key。
+
+新增账号字段：
+
+- `qa_rooms.owner_account_id`
+- `qa_players.account_id`
+- `tycoon_rooms.owner_account_id`
+- `tycoon_players.account_id`
+
+新增账号 RPC：
+
+- `account_bind_records`：把当前设备中仍保存 `player_key` 的匿名玩家记录绑定到当前登录账号。
+- `account_get_records`：返回当前账号参与过的 100 Q&As 和 Friends Tycoon 房间列表。
+
+跨设备恢复策略：
+
+- 新设备登录后，从“我的记录”进入房间。
+- 前端请求房间时即使没有 `player_key`，服务端也会使用 `auth.uid()` 查找该账号在房间中的玩家。
+- 找到后返回 `currentPlayerId`，前端把它缓存为当前设备身份。
+
+## PDF 导出
+
+100 Q&As 结果页新增导出流程：
+
+- `#qa/export/:code` 渲染打印排版页面。
+- 页面只展示已提交玩家的答案。
+- 未提交玩家不能导出其他人的答案。
+- 第一版使用浏览器打印功能保存 PDF，降低中文字体和分页兼容风险。
 
 ## 本地身份方案
 
@@ -215,6 +258,6 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 
 后续接入数据库时：
 
-- 浏览器保存原始 `player_key`。
-- 服务端只保存 `player_key_hash`。
-- 通过 `room_id + player_id + player_key` 校验编辑权限。
+- 当前实现中，浏览器保存原始 `player_key`，服务端也保存 `player_key`，并通过 `room_id + player_id + player_key` 校验匿名玩家权限。
+- 登录账号后，服务端也允许通过 `account_id = auth.uid()` 校验同一玩家权限。
+- 后续若要进一步加强安全性，可以迁移为服务端保存 `player_key_hash`。

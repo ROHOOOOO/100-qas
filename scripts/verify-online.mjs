@@ -259,6 +259,15 @@ try {
   assert(await pageA.locator(".answer-row").count() === 6, "Player A should see Player B after refreshing results.");
   assert(await pageA.getByText("你的答案已经锁定").count() === 1, "Submitted player should see locked-answer status.");
 
+  await pageA.getByRole("button", { name: "导出 PDF" }).click();
+  await pageA.waitForURL(/#qa\/export\//, { timeout: 15000 });
+  await pageA.getByRole("heading", { name: "100 Q&As 导出" }).waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "打印 / 保存 PDF" }).waitFor({ timeout: 15000 });
+  assert(await pageA.locator(".pdf-question").count() === 3, "Online PDF export should show the 3 custom questions.");
+  assert(await pageA.locator(".pdf-answer").count() === 6, "Online PDF export should include both submitted players.");
+  await pageA.getByRole("button", { name: "返回结果页" }).click();
+  await pageA.getByRole("heading", { name: "大家的答案" }).waitFor({ timeout: 15000 });
+
   await pageA.screenshot({ path: resultScreenshot, fullPage: false });
 
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
