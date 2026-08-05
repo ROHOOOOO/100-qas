@@ -2144,9 +2144,13 @@
 
   function authFriendlyError(error) {
     var message = error && error.message ? error.message : "";
-    if (/invalid/i.test(message)) return "账号或密码不正确。";
-    if (/already/i.test(message) || /registered/i.test(message)) return "这个邮箱可能已经注册，可以直接登录。";
-    if (/password/i.test(message)) return "密码至少需要 6 位。";
+    var normalized = message.toLowerCase();
+    if (/rate limit|too many|over_email_send_rate_limit|email rate limit/.test(normalized)) return "注册邮件发送太频繁，Supabase 暂时限流了。请稍后再试，或先在 Supabase Auth 里关闭邮箱确认。";
+    if (/email.*not.*confirm|confirm.*email|email_not_confirmed/.test(normalized)) return "这个账号还没完成邮箱确认，请先去邮箱里点确认链接再登录。";
+    if (/email.*invalid|invalid.*email|email address.*invalid|email_address_invalid/.test(normalized)) return "这个邮箱暂时不能用于注册，请换一个常用邮箱再试。";
+    if (/already/i.test(message) || /registered/i.test(message) || /exists/i.test(message)) return "这个邮箱可能已经注册，可以直接登录。";
+    if (/password/i.test(message) || /weak_password/i.test(message)) return "密码至少需要 6 位，建议包含字母和数字。";
+    if (/invalid/i.test(message) || /credentials/i.test(message)) return "账号或密码不正确。";
     return "账号操作失败，请稍后再试。";
   }
 
