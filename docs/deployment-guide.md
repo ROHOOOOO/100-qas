@@ -37,7 +37,10 @@
 - Friends Tycoon 线上双玩家验收已通过，测试房间 `5D1C74` 跑通创建、加入、聊天、开始、掷骰、结束回合、退出即破产、重新进入恢复和最终结果。
 - 最新 `supabase/schema.sql` 额外加入“已结束/已解散房间不能再退出”的后端保护；线上页面已先隐藏该入口，方便时可再次运行 SQL 让数据库层同步这条保护。
 - 账号登录/注册、我的记录、匿名记录绑定和 100 Q&As PDF 导出已完成本地开发与本地自动化验收。
-- 账号功能需要再次运行最新版 `supabase/schema.sql` 后发布到 GitHub Pages，再做线上验收。
+- 用户已在 Supabase SQL Editor 运行账号版最新版 `supabase/schema.sql`。
+- GitHub Pages 已更新到提交 `f85a0a3`。
+- 线上 100 Q&As、Friends Tycoon 和 100 Q&As PDF 导出已通过自动化验收。
+- 账号注册端到端验收遇到 Supabase Auth 邮件发送限流 `over_email_send_rate_limit`；等待限流恢复或调整邮箱确认/邮件发送设置后继续测试。
 
 ## 使用流程
 

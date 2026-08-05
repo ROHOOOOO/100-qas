@@ -13,3 +13,7 @@
 - 通过 `node scripts/verify-static.mjs` 静态验证。
 - 通过 `node --check` 检查 `src/app.js` 与验证脚本语法。
 - 通过 `node scripts/verify-browser.mjs` 本地完整浏览器验收：Friends Tycoon、100 Q&As、PDF 导出、账号记录页和移动端大厅均通过。
+- 用户已在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`，反馈运行成功。
+- 已通过 GitHub API 发布到 GitHub `main`，提交为 `f85a0a3 Add account records and QA PDF export`。
+- 已确认 GitHub Pages `src/app.js` 可访问新版账号代码。
+- 已通过 `scripts/verify-online.mjs` 线上验收：100 Q&As 测试房间 `6D2763` 跑通 3 题双玩家提交和 PDF 导出，Friends Tycoon 测试房间 `9592F8` 跑通退出破产、最终结果和聊天清空。

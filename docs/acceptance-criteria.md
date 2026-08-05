@@ -143,4 +143,5 @@
 
 - `scripts/verify-static.mjs` 已通过，确认账号入口、账号 RPC、PDF 导出入口和打印样式存在。
 - `scripts/verify-browser.mjs` 已通过，确认本地账号记录页和 100 Q&As PDF 导出版可打开。
-- 线上账号验收待运行最新版 `supabase/schema.sql` 并发布后执行。
+- 线上 100 Q&As PDF 导出已通过 `scripts/verify-online.mjs` 验收，测试房间 `6D2763` 显示 3 个题目卡和 6 条答案。
+- 线上账号注册端到端验收遇到 Supabase Auth 邮件发送限流 `over_email_send_rate_limit`，待限流恢复或调整邮箱确认/邮件发送设置后继续验证注册、记录归属和跨设备恢复。
