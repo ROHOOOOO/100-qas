@@ -36,11 +36,9 @@
 - Friends Games 线上验收已通过，最新 100 Q&As 测试房间 `6E22A5` 中 2 位玩家均提交 3 题，结果页正常展示 6 条答案。
 - Friends Tycoon 线上双玩家验收已通过，测试房间 `5D1C74` 跑通创建、加入、聊天、开始、掷骰、结束回合、退出即破产、重新进入恢复和最终结果。
 - 最新 `supabase/schema.sql` 额外加入“已结束/已解散房间不能再退出”的后端保护；线上页面已先隐藏该入口，方便时可再次运行 SQL 让数据库层同步这条保护。
-- 账号登录/注册、我的记录、匿名记录绑定和 100 Q&As PDF 导出已完成本地开发与本地自动化验收。
-- 用户已在 Supabase SQL Editor 运行账号版最新版 `supabase/schema.sql`。
-- GitHub Pages 已更新到提交 `f85a0a3`。
-- 线上 100 Q&As、Friends Tycoon 和 100 Q&As PDF 导出已通过自动化验收。
-- 账号注册端到端验收遇到 Supabase Auth 邮件发送限流 `over_email_send_rate_limit`；等待限流恢复或调整邮箱确认/邮件发送设置后继续测试。
+- 账号登录/注册已从 Supabase Auth 邮箱方案改为轻量朋友账号名 + 密码方案。
+- 100 Q&As PDF 导出已从“仅打印保存”升级为“直接下载 PDF + 预览兜底 + 打印辅助”。
+- 线上生效前需要再次在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`，然后发布前端并执行线上验收。
 
 ## 使用流程
 
@@ -103,6 +101,11 @@ supabase/schema.sql
 - `tycoon_properties`
 - `tycoon_logs`
 - `tycoon_messages`
+- `game_accounts`
+- `game_account_sessions`
+- `account_register`
+- `account_login`
+- `account_logout`
 - `qa_create_room`
 - `qa_get_room`
 - `qa_join_room`
@@ -127,21 +130,16 @@ supabase/schema.sql
 
 如果后续更新了 `supabase/schema.sql`，可以在 SQL Editor 中再次运行整个文件。该文件会兼容已有表和已有房间。
 
-### 3. 检查 Supabase Auth
+### 3. 账号方案说明
 
-账号第一版使用邮箱 + 密码。
-
-Supabase 后台位置：
-
-```text
-Authentication → Providers → Email
-```
+账号第一版使用朋友账号名 + 密码，不需要配置 Supabase Auth 邮箱或短信。
 
 需要确认：
 
-- Email provider 已启用。
-- 是否要求邮箱确认由房主决定：如果开启邮箱确认，朋友注册后需要先去邮箱点击确认，再登录。
-- 手机号登录第一版暂不启用；等短信服务配置完成后再开放。
+- 已运行最新版 `supabase/schema.sql`。
+- 数据库中存在 `game_accounts` 与 `game_account_sessions`。
+- 前端账号页显示账号名 placeholder：`2-20位，支持中文/英文/数字/下划线`。
+- 前端账号页显示密码 placeholder：`至少4位，请勿使用重要账号密码`。
 
 ### 4. 配置网页
 

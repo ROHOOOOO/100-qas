@@ -196,7 +196,7 @@ const mobileScreenshot = join(tmpdir(), "100-qas-online-mobile.png");
 const health = { logs: [] };
 
 const browser = await launchBrowser(chromium);
-const contextA = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const contextA = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
 const pageA = await contextA.newPage();
 collectPageHealth(pageA, "player-a", health);
 
@@ -262,9 +262,15 @@ try {
   await pageA.getByRole("button", { name: "导出 PDF" }).click();
   await pageA.waitForURL(/#qa\/export\//, { timeout: 15000 });
   await pageA.getByRole("heading", { name: "100 Q&As 导出" }).waitFor({ timeout: 15000 });
-  await pageA.getByRole("button", { name: "打印 / 保存 PDF" }).waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "下载 PDF" }).waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "打开 PDF 预览" }).waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "打印 / 系统保存" }).waitFor({ timeout: 15000 });
   assert(await pageA.locator(".pdf-question").count() === 3, "Online PDF export should show the 3 custom questions.");
   assert(await pageA.locator(".pdf-answer").count() === 6, "Online PDF export should include both submitted players.");
+  const downloadPromise = pageA.waitForEvent("download", { timeout: 10000 });
+  await pageA.getByRole("button", { name: "下载 PDF" }).click();
+  const pdfDownload = await downloadPromise;
+  assert(pdfDownload.suggestedFilename().endsWith(".pdf"), "Online direct export should create a PDF download.");
   await pageA.getByRole("button", { name: "返回结果页" }).click();
   await pageA.getByRole("heading", { name: "大家的答案" }).waitFor({ timeout: 15000 });
 

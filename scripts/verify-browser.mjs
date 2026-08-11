@@ -53,7 +53,7 @@ async function waitForToastsToClear(page) {
 }
 
 const browser = await launchBrowser();
-const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
 const page = await context.newPage();
 const consoleErrors = [];
 
@@ -187,10 +187,16 @@ try {
   await page.getByRole("button", { name: "导出 PDF" }).click();
   await page.waitForURL(/#qa\/export\//);
   await page.getByRole("heading", { name: "100 Q&As 导出" }).waitFor();
-  await page.getByRole("button", { name: "打印 / 保存 PDF" }).waitFor();
+  await page.getByRole("button", { name: "下载 PDF" }).waitFor();
+  await page.getByRole("button", { name: "打开 PDF 预览" }).waitFor();
+  await page.getByRole("button", { name: "打印 / 系统保存" }).waitFor();
   assert(await page.locator(".pdf-question").count() === 3, "PDF export should show the 3 custom questions.");
   assert(await page.locator(".pdf-answer").count() === 3, "PDF export should include only submitted player answers.");
   assert(await page.getByText("导出范围：所有已提交玩家的答案").count() === 1, "PDF export should state its export scope.");
+  const downloadPromise = page.waitForEvent("download", { timeout: 10000 });
+  await page.getByRole("button", { name: "下载 PDF" }).click();
+  const pdfDownload = await downloadPromise;
+  assert(pdfDownload.suggestedFilename().endsWith(".pdf"), "Direct export should create a PDF download.");
   await page.getByRole("button", { name: "返回结果页" }).click();
   await page.getByRole("heading", { name: "大家的答案" }).waitFor();
 

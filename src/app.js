@@ -22,6 +22,7 @@
   var remoteAnswerTimers = {};
   var tycoonPollTimer = null;
   var accountRecordsCache = null;
+  var qaPdfObjectUrl = "";
   var createRoomDraft = {
     mode: "default",
     rawText: "",
@@ -101,33 +102,44 @@
   function loadAuthSession() {
     try {
       var saved = localStorage.getItem(AUTH_SESSION_KEY);
-      return saved ? JSON.parse(saved) : null;
+      var session = saved ? JSON.parse(saved) : null;
+      if (!session) return null;
+      if (!session.token || !session.account) {
+        clearAuthSession();
+        return null;
+      }
+      if (isAuthSessionExpired(session)) {
+        clearAuthSession();
+        return null;
+      }
+      return session;
     } catch (error) {
       return null;
     }
   }
 
   function saveAuthSession(session) {
-    if (!session || !session.access_token) return;
-    var existing = loadAuthSession();
-    var savedSession = Object.assign({}, session);
-    if (!savedSession.user && existing && existing.user) {
-      savedSession.user = existing.user;
-    }
-    if (!savedSession.expires_at && savedSession.expires_in) {
-      savedSession.expires_at = Math.floor(Date.now() / 1000) + Number(savedSession.expires_in);
-    }
+    var savedSession = normalizeAuthSession(session);
+    if (!savedSession || !savedSession.token || !savedSession.account) return;
     localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(savedSession));
     accountRecordsCache = null;
   }
 
   function normalizeAuthSession(result) {
     if (!result) return null;
-    var session = result.session || result;
-    if (result.user && !session.user) {
-      session.user = result.user;
-    }
-    return session;
+    var rawSession = result.session || result;
+    var account = rawSession.account || result.account || null;
+    var token = rawSession.token || rawSession.sessionToken || rawSession.access_token || "";
+    if (!account || !token) return null;
+
+    return {
+      token: String(token),
+      expiresAt: rawSession.expiresAt || rawSession.expires_at || null,
+      account: {
+        id: account.id,
+        username: account.username || account.displayName || account.email || "我的账号"
+      }
+    };
   }
 
   function clearAuthSession() {
@@ -135,99 +147,56 @@
     accountRecordsCache = null;
   }
 
-  function getAuthUser() {
-    var session = loadAuthSession();
-    return session && session.user ? session.user : null;
+  function isAuthSessionExpired(session) {
+    var rawExpiresAt = session && (session.expiresAt || session.expires_at);
+    if (!rawExpiresAt) return false;
+    var expiresAt = Date.parse(rawExpiresAt);
+    return Number.isFinite(expiresAt) && expiresAt <= Date.now();
   }
 
-  function getAuthAccessToken() {
+  function getAuthUser() {
     var session = loadAuthSession();
-    if (!session || !session.access_token) return "";
-    return session.access_token;
+    return session && session.account ? session.account : null;
+  }
+
+  function getAccountToken() {
+    var session = loadAuthSession();
+    if (!session || !session.token) return "";
+    return session.token;
   }
 
   function isLoggedIn() {
-    return Boolean(getAuthAccessToken() && getAuthUser());
+    return Boolean(getAccountToken() && getAuthUser());
   }
 
   function accountLabel() {
     var user = getAuthUser();
     if (!user) return "登录";
-    return user.email || user.phone || "我的账号";
+    return user.username || "我的账号";
   }
 
-  function authBaseUrl() {
-    var config = getConfig();
-    return String(config.supabaseUrl || "").replace(/\/$/, "") + "/auth/v1";
-  }
-
-  async function authRequest(path, body, options) {
-    options = options || {};
-    var config = getConfig();
-    var headers = {
-      apikey: config.supabaseAnonKey,
-      "Content-Type": "application/json"
-    };
-    if (options.accessToken) {
-      headers.Authorization = "Bearer " + options.accessToken;
-    }
-
-    var response = await fetch(authBaseUrl() + path, {
-      method: options.method || "POST",
-      headers: headers,
-      body: body ? JSON.stringify(body) : undefined
-    });
-
-    var data = null;
-    var text = await response.text();
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch (error) {
-        data = { message: text };
-      }
-    }
-
-    if (!response.ok) {
-      throw new Error((data && (data.msg || data.message || data.error_description || data.error)) || "Auth request failed.");
-    }
-
-    return data || {};
-  }
-
-  function normalizeEmail(value) {
-    return String(value || "").trim().toLowerCase();
+  function normalizeUsername(value) {
+    return String(value || "").trim();
   }
 
   async function ensureFreshAuthSession() {
     if (!isSupabaseMode()) return;
-    var session = loadAuthSession();
-    if (!session || !session.refresh_token) return;
-
-    var expiresAt = Number(session.expires_at || 0);
-    var nowSeconds = Math.floor(Date.now() / 1000);
-    if (expiresAt && expiresAt - nowSeconds > 90) return;
-
-    try {
-      var refreshed = await authRequest("/token?grant_type=refresh_token", {
-        refresh_token: session.refresh_token
-      });
-      if (refreshed && refreshed.access_token) {
-        saveAuthSession(refreshed);
-      }
-    } catch (error) {
-      clearAuthSession();
-    }
+    loadAuthSession();
   }
 
   function supabaseHeaders() {
     var config = getConfig();
-    var accessToken = getAuthAccessToken();
     return {
       apikey: config.supabaseAnonKey,
-      Authorization: "Bearer " + (accessToken || config.supabaseAnonKey),
+      Authorization: "Bearer " + config.supabaseAnonKey,
       "Content-Type": "application/json"
     };
+  }
+
+  function withAccountToken(payload) {
+    var nextPayload = Object.assign({}, payload || {});
+    nextPayload.p_account_token = getAccountToken() || null;
+    return nextPayload;
   }
 
   async function supabaseRpc(name, payload) {
@@ -1004,11 +973,11 @@
     if (!isSupabaseMode() || !code) return null;
 
     var identity = getIdentity(String(code).toUpperCase());
-    var bundle = await supabaseRpc("qa_get_room", {
+    var bundle = await supabaseRpc("qa_get_room", withAccountToken({
       p_room_code: String(code).toUpperCase(),
       p_player_id: getIdentityPlayerId(identity),
       p_player_key: identity && identity.playerKey ? identity.playerKey : null
-    });
+    }));
 
     var room = normalizeOnlineRoom(bundle);
     if (!room) return null;
@@ -1028,11 +997,11 @@
     if (!isSupabaseMode() || !code) return null;
 
     var identity = getTycoonIdentity(String(code).toUpperCase());
-    var bundle = await supabaseRpc("tycoon_get_room", {
+    var bundle = await supabaseRpc("tycoon_get_room", withAccountToken({
       p_room_code: String(code).toUpperCase(),
       p_player_id: getTycoonIdentityPlayerId(identity),
       p_player_key: identity && identity.playerKey ? identity.playerKey : null
-    });
+    }));
 
     var room = normalizeOnlineTycoonRoom(bundle);
     if (!room) return null;
@@ -1288,7 +1257,7 @@
   async function loadAccountRecords() {
     if (!isSupabaseMode() || !isLoggedIn()) return localAccountRecords();
     if (accountRecordsCache) return accountRecordsCache;
-    accountRecordsCache = await supabaseRpc("account_get_records", {});
+    accountRecordsCache = await supabaseRpc("account_get_records", withAccountToken({}));
     return accountRecordsCache || { qa: [], tycoon: [] };
   }
 
@@ -1315,16 +1284,12 @@
         '  <section class="panel account-panel">',
         '    <p class="eyebrow">Account</p>',
         '    <h1>登录或注册</h1>',
-        '    <p class="muted">第一版先启用邮箱 + 密码。手机号入口会保留，等短信服务配置好后再打开。</p>',
-        '    <div class="account-mode-row">',
-        '      <span class="small-status">邮箱可用</span>',
-        '      <span class="small-status is-muted">手机号稍后开放</span>',
-        '    </div>',
+        '    <p class="muted">朋友局轻量账号，不需要邮箱验证码。账号名和密码由你自己设定，请不要使用重要账号的密码。</p>',
         '    <form class="stack-form account-form" data-action="account-login">',
-        '      <label for="account-email">邮箱</label>',
-        '      <input id="account-email" name="email" type="email" autocomplete="email" placeholder="you@example.com">',
+        '      <label for="account-username">账号名</label>',
+        '      <input id="account-username" name="username" type="text" autocomplete="username" maxlength="20" placeholder="2-20位，支持中文/英文/数字/下划线">',
         '      <label for="account-password">密码</label>',
-        '      <input id="account-password" name="password" type="password" autocomplete="current-password" minlength="6" placeholder="至少 6 位">',
+        '      <input id="account-password" name="password" type="password" autocomplete="current-password" minlength="4" placeholder="至少4位，请勿使用重要账号密码">',
         '      <div class="dialog-actions">',
         '        <button class="primary-button" type="submit">登录</button>',
         '        <button class="secondary-button" data-action="account-register" type="button">注册新账号</button>',
@@ -2109,10 +2074,13 @@
       '      <p class="eyebrow">PDF export</p>',
       '      <h1>100 Q&As 导出</h1>',
       '      <p class="muted">Room ' + escapeHtml(room.code) + ' · ' + roomQuestions.length + ' 题 · ' + submittedPlayers.length + ' 位已提交玩家</p>',
+      '      <p class="muted pdf-export-hint">优先使用“下载 PDF”。旧手机若下载被拦截，可点“打开 PDF 预览”后用系统分享保存。</p>',
       '    </div>',
       '    <div class="dialog-actions">',
       '      <button class="secondary-button" data-action="open-room" data-code="' + escapeHtml(room.code) + '">返回结果页</button>',
-      '      <button class="primary-button" data-action="print-pdf">打印 / 保存 PDF</button>',
+      '      <button class="primary-button" data-action="download-qa-pdf">下载 PDF</button>',
+      '      <button class="secondary-button" data-action="preview-qa-pdf">打开 PDF 预览</button>',
+      '      <button class="ghost-button" data-action="print-pdf">打印 / 系统保存</button>',
       '    </div>',
       '  </section>',
       '  <article class="pdf-document">',
@@ -2142,32 +2110,271 @@
     ].join(""), "qa");
   }
 
+  function getQaExportData() {
+    var parts = getHashParts();
+    var code = parts[0] === "qa" && parts[1] === "export" ? parts[2] : getQaRoomCode();
+    var state = loadState();
+    var room = getRoomByCode(state, code);
+    if (!room) throw new Error("Room not found.");
+
+    var player = getCurrentPlayer(room);
+    if (!player || !player.submittedAt) {
+      throw new Error("Submit required before export.");
+    }
+
+    return {
+      room: room,
+      questions: getRoomQuestions(room),
+      submittedPlayers: getRoomPlayers(room).filter(function (item) {
+        return Boolean(item.submittedAt);
+      })
+    };
+  }
+
+  function wrapCanvasText(ctx, text, maxWidth) {
+    var paragraphs = String(text || "").split(/\r?\n/);
+    var lines = [];
+
+    paragraphs.forEach(function (paragraph) {
+      var source = paragraph || " ";
+      var current = "";
+      Array.from(source).forEach(function (char) {
+        var next = current + char;
+        if (current && ctx.measureText(next).width > maxWidth) {
+          lines.push(current);
+          current = char;
+        } else {
+          current = next;
+        }
+      });
+      lines.push(current);
+    });
+
+    return lines;
+  }
+
+  function drawCanvasText(ctx, lines, x, y, lineHeight) {
+    lines.forEach(function (line, index) {
+      ctx.fillText(line, x, y + index * lineHeight);
+    });
+    return y + lines.length * lineHeight;
+  }
+
+  function makeQaPdfBlob(room, roomQuestions, submittedPlayers) {
+    var pageWidth = 794;
+    var pageHeight = 1123;
+    var margin = 54;
+    var contentWidth = pageWidth - margin * 2;
+    var pages = [];
+    var canvas = null;
+    var ctx = null;
+    var cursorY = margin;
+
+    function startPage() {
+      canvas = document.createElement("canvas");
+      canvas.width = pageWidth;
+      canvas.height = pageHeight;
+      ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageWidth, pageHeight);
+      cursorY = margin;
+      pages.push(canvas);
+    }
+
+    function ensureSpace(height) {
+      if (!canvas || cursorY + height > pageHeight - margin) {
+        startPage();
+      }
+    }
+
+    function drawMeta(text) {
+      ctx.font = "14px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#60706b";
+      cursorY = drawCanvasText(ctx, wrapCanvasText(ctx, text, contentWidth), margin, cursorY, 22) + 8;
+    }
+
+    startPage();
+    ctx.font = "700 34px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+    ctx.fillStyle = "#1e2b27";
+    cursorY = drawCanvasText(ctx, ["100 Q&As"], margin, cursorY, 42);
+    drawMeta("Room " + room.code + " · " + roomQuestions.length + " 题 · " + submittedPlayers.length + " 位已提交玩家");
+    drawMeta("导出范围：所有已提交玩家的答案 · 生成时间：" + new Date().toLocaleString("zh-CN"));
+    cursorY += 12;
+
+    roomQuestions.forEach(function (question, index) {
+      var number = index + 1;
+      ctx.font = "700 18px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+      var questionLines = wrapCanvasText(ctx, "Q" + number + ". " + question, contentWidth);
+      ensureSpace(questionLines.length * 26 + 18);
+      ctx.font = "700 18px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+      ctx.fillStyle = "#1e2b27";
+      cursorY = drawCanvasText(ctx, questionLines, margin, cursorY, 26) + 10;
+
+      submittedPlayers.forEach(function (submittedPlayer) {
+        var answer = submittedPlayer.answers[String(number)] || "";
+        ctx.font = "700 14px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+        var nameLines = wrapCanvasText(ctx, submittedPlayer.nickname, contentWidth - 24);
+        ctx.font = "15px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+        var answerLines = wrapCanvasText(ctx, answer || " ", contentWidth - 24);
+        var answerHeight = 16 + nameLines.length * 20 + answerLines.length * 24;
+        ensureSpace(answerHeight + 8);
+
+        ctx.fillStyle = "#f5fbf9";
+        ctx.fillRect(margin, cursorY - 2, contentWidth, answerHeight);
+        ctx.font = "700 14px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#25332f";
+        cursorY = drawCanvasText(ctx, nameLines, margin + 12, cursorY + 12, 20) + 4;
+        ctx.font = "15px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+        ctx.fillStyle = "#33443f";
+        cursorY = drawCanvasText(ctx, answerLines, margin + 12, cursorY, 24) + 12;
+      });
+
+      cursorY += 14;
+    });
+
+    pages.forEach(function (page, index) {
+      var pageCtx = page.getContext("2d");
+      pageCtx.font = "12px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
+      pageCtx.fillStyle = "#8a9792";
+      pageCtx.fillText(String(index + 1) + " / " + pages.length, pageWidth - margin - 36, pageHeight - 28);
+    });
+
+    return makeImagePdfBlob(pages, pageWidth, pageHeight);
+  }
+
+  function base64ToBytes(base64) {
+    var binary = window.atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function makeImagePdfBlob(canvases, pageWidth, pageHeight) {
+    var encoder = new TextEncoder();
+    var chunks = [];
+    var offsets = [0];
+    var offset = 0;
+    var objectCount = 2 + canvases.length * 3;
+
+    function addBytes(bytes) {
+      chunks.push(bytes);
+      offset += bytes.length;
+    }
+
+    function addText(text) {
+      addBytes(encoder.encode(text));
+    }
+
+    function beginObject(id) {
+      offsets[id] = offset;
+      addText(id + " 0 obj\n");
+    }
+
+    addText("%PDF-1.4\n");
+
+    beginObject(1);
+    addText("<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    beginObject(2);
+    addText("<< /Type /Pages /Kids [" + canvases.map(function (_, index) {
+      return (3 + index * 3) + " 0 R";
+    }).join(" ") + "] /Count " + canvases.length + " >>\nendobj\n");
+
+    canvases.forEach(function (pageCanvas, index) {
+      var pageObjectId = 3 + index * 3;
+      var imageObjectId = pageObjectId + 1;
+      var contentObjectId = pageObjectId + 2;
+      var imageName = "Im" + (index + 1);
+      var jpegBytes = base64ToBytes(pageCanvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
+      var content = "q\n" + pageWidth + " 0 0 " + pageHeight + " 0 0 cm\n/" + imageName + " Do\nQ\n";
+
+      beginObject(pageObjectId);
+      addText("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + pageWidth + " " + pageHeight + "] /Resources << /XObject << /" + imageName + " " + imageObjectId + " 0 R >> >> /Contents " + contentObjectId + " 0 R >>\nendobj\n");
+
+      beginObject(imageObjectId);
+      addText("<< /Type /XObject /Subtype /Image /Width " + pageCanvas.width + " /Height " + pageCanvas.height + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpegBytes.length + " >>\nstream\n");
+      addBytes(jpegBytes);
+      addText("\nendstream\nendobj\n");
+
+      beginObject(contentObjectId);
+      addText("<< /Length " + encoder.encode(content).length + " >>\nstream\n" + content + "endstream\nendobj\n");
+    });
+
+    var xrefStart = offset;
+    addText("xref\n0 " + (objectCount + 1) + "\n");
+    addText("0000000000 65535 f \n");
+    for (var objectId = 1; objectId <= objectCount; objectId += 1) {
+      addText(String(offsets[objectId]).padStart(10, "0") + " 00000 n \n");
+    }
+    addText("trailer\n<< /Size " + (objectCount + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefStart + "\n%%EOF\n");
+
+    return new Blob(chunks, { type: "application/pdf" });
+  }
+
+  function latestQaPdfUrl(blob) {
+    if (qaPdfObjectUrl) {
+      URL.revokeObjectURL(qaPdfObjectUrl);
+    }
+    qaPdfObjectUrl = URL.createObjectURL(blob);
+    return qaPdfObjectUrl;
+  }
+
+  function qaPdfFilename(room) {
+    return "100-qas-room-" + String(room.code || "export").replace(/[^A-Za-z0-9_-]/g, "") + ".pdf";
+  }
+
+  function exportQaPdf(mode) {
+    try {
+      var data = getQaExportData();
+      showToast("正在生成 PDF...");
+      var blob = makeQaPdfBlob(data.room, data.questions, data.submittedPlayers);
+      var url = latestQaPdfUrl(blob);
+      var filename = qaPdfFilename(data.room);
+
+      if (mode === "preview") {
+        var opened = window.open(url, "_blank");
+        if (!opened) window.location.href = url;
+        return;
+      }
+
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showToast("PDF 已生成，可以在下载记录里查看。");
+    } catch (error) {
+      showToast("PDF 生成失败，请稍后再试。");
+    }
+  }
+
   function authFriendlyError(error) {
     var message = error && error.message ? error.message : "";
     var normalized = message.toLowerCase();
-    if (/rate limit|too many|over_email_send_rate_limit|email rate limit/.test(normalized)) return "注册邮件发送太频繁，Supabase 暂时限流了。请稍后再试，或先在 Supabase Auth 里关闭邮箱确认。";
-    if (/email.*not.*confirm|confirm.*email|email_not_confirmed/.test(normalized)) return "这个账号还没完成邮箱确认，请先去邮箱里点确认链接再登录。";
-    if (/email.*invalid|invalid.*email|email address.*invalid|email_address_invalid/.test(normalized)) return "这个邮箱暂时不能用于注册，请换一个常用邮箱再试。";
-    if (/already/i.test(message) || /registered/i.test(message) || /exists/i.test(message)) return "这个邮箱可能已经注册，可以直接登录。";
-    if (/password/i.test(message) || /weak_password/i.test(message)) return "密码至少需要 6 位，建议包含字母和数字。";
-    if (/invalid/i.test(message) || /credentials/i.test(message)) return "账号或密码不正确。";
+    if (/username.*already|duplicate key|already.*exists|exists/.test(normalized)) return "这个账号名已经被使用，换一个账号名或直接登录。";
+    if (/invalid username or password|invalid account session|credentials|login required/.test(normalized)) return "账号名或密码不正确。";
+    if (/invalid username|username.*required|username/.test(normalized)) return "账号名需要 2-20 位，只支持中文、英文、数字和下划线。";
+    if (/password.*short|password/.test(normalized)) return "密码至少需要 4 位，请重新设置。";
+    if (/invalid/.test(normalized)) return "账号名或密码不正确。";
     return "账号操作失败，请稍后再试。";
   }
 
-  async function loginAccount(email, password) {
-    var safeEmail = normalizeEmail(email);
-    if (!safeEmail || !password) {
-      showToast("请填写邮箱和密码。");
+  async function loginAccount(username, password) {
+    var safeUsername = normalizeUsername(username);
+    if (!safeUsername || !password) {
+      showToast("请填写账号名和密码。");
       return;
     }
 
     try {
-      var result = await authRequest("/token?grant_type=password", {
-        email: safeEmail,
-        password: String(password || "")
+      var result = await supabaseRpc("account_login", {
+        p_username: safeUsername,
+        p_password: String(password || "")
       });
-      var session = normalizeAuthSession(result);
-      saveAuthSession(session);
+      saveAuthSession(result);
       showToast("已登录。");
       render();
     } catch (error) {
@@ -2177,37 +2384,32 @@
 
   async function registerAccountFromForm(form) {
     var formData = new FormData(form);
-    var safeEmail = normalizeEmail(formData.get("email"));
+    var safeUsername = normalizeUsername(formData.get("username"));
     var password = String(formData.get("password") || "");
-    if (!safeEmail || !password) {
-      showToast("请填写邮箱和密码。");
+    if (!safeUsername || !password) {
+      showToast("请填写账号名和密码。");
       return;
     }
 
     try {
-      var result = await authRequest("/signup", {
-        email: safeEmail,
-        password: password
+      var result = await supabaseRpc("account_register", {
+        p_username: safeUsername,
+        p_password: password
       });
-      var session = normalizeAuthSession(result);
-      if (session && session.access_token) {
-        saveAuthSession(session);
-        showToast("注册成功，已登录。");
-        render();
-      } else {
-        showToast("注册成功。若系统要求邮箱确认，请先到邮箱里确认后再登录。");
-      }
+      saveAuthSession(result);
+      showToast("注册成功，已登录。");
+      render();
     } catch (error) {
       showToast(authFriendlyError(error));
     }
   }
 
   async function logoutAccount() {
-    var token = getAuthAccessToken();
+    var token = getAccountToken();
     try {
       if (token) {
-        await authRequest("/logout", null, {
-          accessToken: token
+        await supabaseRpc("account_logout", {
+          p_account_token: token
         });
       }
     } catch (error) {
@@ -2233,6 +2435,7 @@
 
     try {
       var result = await supabaseRpc("account_bind_records", {
+        p_account_token: getAccountToken(),
         p_qa_players: payload.qaPlayers,
         p_tycoon_players: payload.tycoonPlayers
       });
@@ -2255,7 +2458,7 @@
 
     if (isSupabaseMode()) {
       try {
-        var payload = { p_questions: selectedQuestions };
+        var payload = withAccountToken({ p_questions: selectedQuestions });
         var bundle;
 
         try {
@@ -2264,7 +2467,7 @@
           if (isCustom) {
             throw error;
           }
-          bundle = await supabaseRpc("qa_create_room", {});
+          bundle = await supabaseRpc("qa_create_room", withAccountToken({ p_questions: null }));
         }
 
         var onlineRoom = normalizeOnlineRoom(bundle);
@@ -2371,11 +2574,11 @@
     if (isSupabaseMode()) {
       try {
         var playerKey = makePlayerKey();
-        var bundle = await supabaseRpc("qa_join_room", {
+        var bundle = await supabaseRpc("qa_join_room", withAccountToken({
           p_room_code: room.code,
           p_nickname: trimmed,
           p_player_key: playerKey
-        });
+        }));
         var onlineRoom = normalizeOnlineRoom(bundle);
         if (!onlineRoom || !bundle.currentPlayerId) throw new Error("Player was not created.");
         cacheRoom(onlineRoom);
@@ -2444,13 +2647,13 @@
       var latestPlayer = latestRoom && latestRoom.players[player.id];
       if (!latestPlayer || latestPlayer.submittedAt) return;
 
-      supabaseRpc("qa_save_answer", {
+      supabaseRpc("qa_save_answer", withAccountToken({
         p_room_code: room.code,
         p_player_id: player.id,
         p_player_key: identity.playerKey || null,
         p_question_index: Number(questionNumber),
         p_content: content
-      }).catch(function () {
+      })).catch(function () {
         showToast("这题暂时没有同步成功，稍后会在提交时再保存。");
       });
     }, 500);
@@ -2541,12 +2744,12 @@
 
       try {
         clearOnlineAnswerTimers(room, player);
-        var bundle = await supabaseRpc("qa_submit_player", {
+        var bundle = await supabaseRpc("qa_submit_player", withAccountToken({
           p_room_code: room.code,
           p_player_id: player.id,
           p_player_key: identity.playerKey || null,
           p_answers: player.answers
-        });
+        }));
         var onlineRoom = normalizeOnlineRoom(bundle);
         if (onlineRoom) cacheRoom(onlineRoom);
         closeSubmitConfirm();
@@ -2683,12 +2886,12 @@
     if (isSupabaseMode()) {
       try {
         var playerKey = makePlayerKey();
-        var bundle = await supabaseRpc("tycoon_create_room", {
+        var bundle = await supabaseRpc("tycoon_create_room", withAccountToken({
           p_nickname: trimmed,
           p_player_key: playerKey,
           p_victory_mode: safeVictoryMode,
           p_turn_limit: safeTurnLimit
-        });
+        }));
         var onlineRoom = normalizeOnlineTycoonRoom(bundle);
         if (!onlineRoom || !bundle.currentPlayerId) throw new Error("Tycoon room was not created.");
         cacheTycoonRoom(onlineRoom);
@@ -2759,11 +2962,11 @@
     if (isSupabaseMode()) {
       try {
         var playerKey = makePlayerKey();
-        var bundle = await supabaseRpc("tycoon_join_room", {
+        var bundle = await supabaseRpc("tycoon_join_room", withAccountToken({
           p_room_code: roomCode,
           p_nickname: trimmed,
           p_player_key: playerKey
-        });
+        }));
         var onlineRoom = normalizeOnlineTycoonRoom(bundle);
         if (!onlineRoom || !bundle.currentPlayerId) throw new Error("Tycoon player was not created.");
         cacheTycoonRoom(onlineRoom);
@@ -2839,7 +3042,7 @@
       p_player_id: getTycoonIdentityPlayerId(identity),
       p_player_key: identity && identity.playerKey ? identity.playerKey : null
     };
-    var bundle = await supabaseRpc(name, Object.assign(basePayload, payload || {}));
+    var bundle = await supabaseRpc(name, withAccountToken(Object.assign(basePayload, payload || {})));
     var onlineRoom = normalizeOnlineTycoonRoom(bundle);
     if (onlineRoom) cacheTycoonRoom(onlineRoom);
     render({ skipOnlineSync: true });
@@ -3187,6 +3390,8 @@
       accountRecordsCache = null;
       render();
     }
+    if (action === "download-qa-pdf") exportQaPdf("download");
+    if (action === "preview-qa-pdf") exportQaPdf("preview");
     if (action === "print-pdf") window.print();
   });
 
@@ -3219,7 +3424,7 @@
     if (action === "account-login") {
       var accountData = new FormData(form);
       loginAccount(
-        String(accountData.get("email") || ""),
+        String(accountData.get("username") || ""),
         String(accountData.get("password") || "")
       );
     }

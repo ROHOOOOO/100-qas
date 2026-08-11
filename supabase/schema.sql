@@ -1,5 +1,30 @@
 create extension if not exists pgcrypto;
 
+create table if not exists public.game_accounts (
+  id uuid primary key default gen_random_uuid(),
+  username text not null,
+  username_key text not null unique,
+  password_hash text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.game_account_sessions (
+  token_hash text primary key,
+  account_id uuid not null references public.game_accounts(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists game_account_sessions_account_id_idx on public.game_account_sessions (account_id);
+create index if not exists game_account_sessions_expires_at_idx on public.game_account_sessions (expires_at);
+
+alter table public.game_accounts enable row level security;
+alter table public.game_account_sessions enable row level security;
+
+revoke all on public.game_accounts from anon, authenticated;
+revoke all on public.game_account_sessions from anon, authenticated;
+
 create table if not exists public.qa_rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -12,7 +37,7 @@ alter table public.qa_rooms
 add column if not exists questions jsonb not null default '[]'::jsonb;
 
 alter table public.qa_rooms
-add column if not exists owner_account_id uuid references auth.users(id) on delete set null;
+add column if not exists owner_account_id uuid;
 
 do $$
 begin
@@ -38,7 +63,48 @@ create table if not exists public.qa_players (
 );
 
 alter table public.qa_players
-add column if not exists account_id uuid references auth.users(id) on delete set null;
+add column if not exists account_id uuid;
+
+do $$
+begin
+  alter table public.qa_rooms drop constraint if exists qa_rooms_owner_account_id_fkey;
+  alter table public.qa_players drop constraint if exists qa_players_account_id_fkey;
+
+  update public.qa_rooms r
+     set owner_account_id = null
+   where owner_account_id is not null
+     and not exists (
+       select 1 from public.game_accounts a where a.id = r.owner_account_id
+     );
+
+  update public.qa_players p
+     set account_id = null
+   where account_id is not null
+     and not exists (
+       select 1 from public.game_accounts a where a.id = p.account_id
+     );
+
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'qa_rooms_owner_account_id_game_accounts_fkey'
+       and conrelid = 'public.qa_rooms'::regclass
+  ) then
+    alter table public.qa_rooms
+    add constraint qa_rooms_owner_account_id_game_accounts_fkey
+    foreign key (owner_account_id) references public.game_accounts(id) on delete set null;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'qa_players_account_id_game_accounts_fkey'
+       and conrelid = 'public.qa_players'::regclass
+  ) then
+    alter table public.qa_players
+    add constraint qa_players_account_id_game_accounts_fkey
+    foreign key (account_id) references public.game_accounts(id) on delete set null;
+  end if;
+end $$;
+
 
 create table if not exists public.qa_answers (
   room_id uuid not null references public.qa_rooms(id) on delete cascade,
@@ -61,10 +127,151 @@ revoke all on public.qa_players from anon, authenticated;
 revoke all on public.qa_answers from anon, authenticated;
 grant usage on schema public to anon, authenticated;
 
+create or replace function public.game_account_id_from_token(
+  p_account_token text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_account_id uuid;
+begin
+  if coalesce(btrim(p_account_token), '') = '' then
+    return null;
+  end if;
+
+  delete from public.game_account_sessions
+   where expires_at <= now();
+
+  select s.account_id
+    into v_account_id
+    from public.game_account_sessions s
+   where s.token_hash = encode(digest(p_account_token, 'sha256'), 'hex')
+     and s.expires_at > now();
+
+  return v_account_id;
+end;
+$$;
+
+create or replace function public.account_session_payload(
+  p_account public.game_accounts
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_token text := encode(gen_random_bytes(32), 'hex');
+  v_expires_at timestamptz := now() + interval '90 days';
+begin
+  insert into public.game_account_sessions (token_hash, account_id, expires_at)
+  values (encode(digest(v_token, 'sha256'), 'hex'), p_account.id, v_expires_at);
+
+  return jsonb_build_object(
+    'account', jsonb_build_object(
+      'id', p_account.id,
+      'username', p_account.username
+    ),
+    'token', v_token,
+    'expiresAt', v_expires_at
+  );
+end;
+$$;
+
+create or replace function public.account_register(
+  p_username text,
+  p_password text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_username text := btrim(coalesce(p_username, ''));
+  v_username_key text := lower(btrim(coalesce(p_username, '')));
+  v_account public.game_accounts%rowtype;
+begin
+  if char_length(v_username) < 2
+     or char_length(v_username) > 20
+     or v_username !~ '^[0-9A-Za-z_一-龥]+$' then
+    raise exception 'Invalid username.';
+  end if;
+
+  if char_length(coalesce(p_password, '')) < 4 then
+    raise exception 'Password is too short.';
+  end if;
+
+  insert into public.game_accounts (username, username_key, password_hash)
+  values (v_username, v_username_key, crypt(p_password, gen_salt('bf')))
+  returning *
+  into v_account;
+
+  return public.account_session_payload(v_account);
+exception
+  when unique_violation then
+    raise exception 'Username already exists.';
+end;
+$$;
+
+create or replace function public.account_login(
+  p_username text,
+  p_password text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_username_key text := lower(btrim(coalesce(p_username, '')));
+  v_account public.game_accounts%rowtype;
+begin
+  select *
+    into v_account
+    from public.game_accounts
+   where username_key = v_username_key;
+
+  if not found or v_account.password_hash <> crypt(coalesce(p_password, ''), v_account.password_hash) then
+    raise exception 'Invalid username or password.';
+  end if;
+
+  update public.game_accounts
+     set updated_at = now()
+   where id = v_account.id;
+
+  return public.account_session_payload(v_account);
+end;
+$$;
+
+create or replace function public.account_logout(
+  p_account_token text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if coalesce(btrim(p_account_token), '') <> '' then
+    delete from public.game_account_sessions
+     where token_hash = encode(digest(p_account_token, 'sha256'), 'hex');
+  end if;
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+drop function if exists public.qa_room_bundle(text, uuid, text);
+
 create or replace function public.qa_room_bundle(
   p_room_code text,
   p_player_id uuid default null,
-  p_player_key text default null
+  p_player_key text default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -74,7 +281,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_current public.qa_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_has_current boolean := false;
   v_can_view_results boolean := false;
 begin
@@ -184,9 +391,11 @@ end;
 $$;
 
 drop function if exists public.qa_create_room();
+drop function if exists public.qa_create_room(jsonb);
 
 create or replace function public.qa_create_room(
-  p_questions jsonb default null
+  p_questions jsonb default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -196,6 +405,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_questions jsonb := '[]'::jsonb;
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_attempts integer := 0;
 begin
   if p_questions is not null then
@@ -226,7 +436,7 @@ begin
 
     begin
       insert into public.qa_rooms (code, questions, owner_account_id)
-      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6), v_questions, auth.uid())
+      values (substring(upper(replace(gen_random_uuid()::text, '-', '')) from 1 for 6), v_questions, v_account_id)
       returning *
       into v_room;
 
@@ -239,14 +449,17 @@ begin
     end;
   end loop;
 
-  return public.qa_room_bundle(v_room.code, null, null);
+  return public.qa_room_bundle(v_room.code, null, null, p_account_token);
 end;
 $$;
+
+drop function if exists public.qa_get_room(text, uuid, text);
 
 create or replace function public.qa_get_room(
   p_room_code text,
   p_player_id uuid default null,
-  p_player_key text default null
+  p_player_key text default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -254,14 +467,17 @@ security definer
 set search_path = public
 as $$
 begin
-  return public.qa_room_bundle(p_room_code, p_player_id, p_player_key);
+  return public.qa_room_bundle(p_room_code, p_player_id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.qa_join_room(text, text, text);
 
 create or replace function public.qa_join_room(
   p_room_code text,
   p_nickname text,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -271,7 +487,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_nickname text;
 begin
   v_nickname := left(btrim(p_nickname), 20);
@@ -305,7 +521,7 @@ begin
        returning *
        into v_player;
 
-      return public.qa_room_bundle(v_room.code, v_player.id, null);
+      return public.qa_room_bundle(v_room.code, v_player.id, null, p_account_token);
     end if;
   end if;
 
@@ -318,16 +534,19 @@ begin
   returning *
   into v_player;
 
-  return public.qa_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.qa_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.qa_save_answer(text, uuid, text, integer, text);
 
 create or replace function public.qa_save_answer(
   p_room_code text,
   p_player_id uuid,
   p_player_key text,
   p_question_index integer,
-  p_content text
+  p_content text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -337,7 +556,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_required_count integer;
 begin
   select *
@@ -387,11 +606,14 @@ begin
 end;
 $$;
 
+drop function if exists public.qa_submit_player(text, uuid, text, jsonb);
+
 create or replace function public.qa_submit_player(
   p_room_code text,
   p_player_id uuid,
   p_player_key text,
-  p_answers jsonb default null
+  p_answers jsonb default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -401,7 +623,7 @@ as $$
 declare
   v_room public.qa_rooms%rowtype;
   v_player public.qa_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_required_count integer;
   v_answer_count integer;
   v_item record;
@@ -430,7 +652,7 @@ begin
   end if;
 
   if v_player.submitted_at is not null then
-    return public.qa_room_bundle(v_room.code, v_player.id, p_player_key);
+    return public.qa_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
   end if;
 
   v_required_count := case
@@ -468,15 +690,19 @@ begin
    returning *
    into v_player;
 
-  return public.qa_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.qa_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
 
-grant execute on function public.qa_create_room(jsonb) to anon, authenticated;
-grant execute on function public.qa_get_room(text, uuid, text) to anon, authenticated;
-grant execute on function public.qa_join_room(text, text, text) to anon, authenticated;
-grant execute on function public.qa_save_answer(text, uuid, text, integer, text) to anon, authenticated;
-grant execute on function public.qa_submit_player(text, uuid, text, jsonb) to anon, authenticated;
+grant execute on function public.account_register(text, text) to anon, authenticated;
+grant execute on function public.account_login(text, text) to anon, authenticated;
+grant execute on function public.account_logout(text) to anon, authenticated;
+grant execute on function public.qa_create_room(jsonb, text) to anon, authenticated;
+grant execute on function public.qa_get_room(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.qa_join_room(text, text, text, text) to anon, authenticated;
+grant execute on function public.qa_save_answer(text, uuid, text, integer, text, text) to anon, authenticated;
+grant execute on function public.qa_submit_player(text, uuid, text, jsonb, text) to anon, authenticated;
+revoke execute on function public.qa_room_bundle(text, uuid, text, text) from public, anon, authenticated;
 
 create or replace function public.tycoon_default_map()
 returns jsonb
@@ -552,10 +778,50 @@ create table if not exists public.tycoon_players (
 );
 
 alter table public.tycoon_rooms
-add column if not exists owner_account_id uuid references auth.users(id) on delete set null;
+add column if not exists owner_account_id uuid;
 
 alter table public.tycoon_players
-add column if not exists account_id uuid references auth.users(id) on delete set null;
+add column if not exists account_id uuid;
+
+do $$
+begin
+  alter table public.tycoon_rooms drop constraint if exists tycoon_rooms_owner_account_id_fkey;
+  alter table public.tycoon_players drop constraint if exists tycoon_players_account_id_fkey;
+
+  update public.tycoon_rooms r
+     set owner_account_id = null
+   where owner_account_id is not null
+     and not exists (
+       select 1 from public.game_accounts a where a.id = r.owner_account_id
+     );
+
+  update public.tycoon_players p
+     set account_id = null
+   where account_id is not null
+     and not exists (
+       select 1 from public.game_accounts a where a.id = p.account_id
+     );
+
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'tycoon_rooms_owner_account_id_game_accounts_fkey'
+       and conrelid = 'public.tycoon_rooms'::regclass
+  ) then
+    alter table public.tycoon_rooms
+    add constraint tycoon_rooms_owner_account_id_game_accounts_fkey
+    foreign key (owner_account_id) references public.game_accounts(id) on delete set null;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'tycoon_players_account_id_game_accounts_fkey'
+       and conrelid = 'public.tycoon_players'::regclass
+  ) then
+    alter table public.tycoon_players
+    add constraint tycoon_players_account_id_game_accounts_fkey
+    foreign key (account_id) references public.game_accounts(id) on delete set null;
+  end if;
+end $$;
 
 create table if not exists public.tycoon_properties (
   room_id uuid not null references public.tycoon_rooms(id) on delete cascade,
@@ -618,10 +884,13 @@ begin
 end;
 $$;
 
+drop function if exists public.tycoon_room_bundle(text, uuid, text);
+
 create or replace function public.tycoon_room_bundle(
   p_room_code text,
   p_player_id uuid default null,
-  p_player_key text default null
+  p_player_key text default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -631,7 +900,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_current public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_has_current boolean := false;
 begin
   select *
@@ -1032,11 +1301,14 @@ begin
 end;
 $$;
 
+drop function if exists public.tycoon_create_room(text, text, text, integer);
+
 create or replace function public.tycoon_create_room(
   p_nickname text,
   p_player_key text,
   p_victory_mode text default 'survivor',
-  p_turn_limit integer default 30
+  p_turn_limit integer default 30,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1046,7 +1318,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_code text;
   v_attempts integer := 0;
   v_nickname text;
@@ -1095,14 +1367,17 @@ begin
 
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 创建了房间。', 'host');
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_get_room(text, uuid, text);
 
 create or replace function public.tycoon_get_room(
   p_room_code text,
   p_player_id uuid default null,
-  p_player_key text default null
+  p_player_key text default null,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1110,14 +1385,17 @@ security definer
 set search_path = public
 as $$
 begin
-  return public.tycoon_room_bundle(p_room_code, p_player_id, p_player_key);
+  return public.tycoon_room_bundle(p_room_code, p_player_id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_join_room(text, text, text);
 
 create or replace function public.tycoon_join_room(
   p_room_code text,
   p_nickname text,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1127,7 +1405,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_nickname text;
   v_player_count integer;
 begin
@@ -1177,7 +1455,7 @@ begin
        returning *
        into v_player;
 
-      return public.tycoon_room_bundle(v_room.code, v_player.id, null);
+      return public.tycoon_room_bundle(v_room.code, v_player.id, null, p_account_token);
     end if;
   end if;
 
@@ -1193,14 +1471,17 @@ begin
 
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 加入了游戏。', 'join');
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_start_game(text, uuid, text);
 
 create or replace function public.tycoon_start_game(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1210,7 +1491,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_first_player_id uuid;
   v_player_count integer;
 begin
@@ -1280,14 +1561,17 @@ begin
 
   perform public.tycoon_add_log(v_room.id, '游戏开始。', 'start');
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_roll_dice(text, uuid, text);
 
 create or replace function public.tycoon_roll_dice(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1297,7 +1581,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_cell jsonb;
   v_property public.tycoon_properties%rowtype;
   v_owner public.tycoon_players%rowtype;
@@ -1405,14 +1689,17 @@ begin
     perform public.tycoon_finish_if_needed(v_room.id);
   end if;
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_buy_property(text, uuid, text);
 
 create or replace function public.tycoon_buy_property(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1422,7 +1709,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_property public.tycoon_properties%rowtype;
   v_cell jsonb;
   v_price integer;
@@ -1461,14 +1748,17 @@ begin
   update public.tycoon_properties set owner_player_id = v_player.id, level = 1 where room_id = v_room.id and cell_index = v_player.position;
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 买下 ' || (v_cell ->> 'name') || '，等级 1。', 'property');
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_upgrade_property(text, uuid, text);
 
 create or replace function public.tycoon_upgrade_property(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1478,7 +1768,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_property public.tycoon_properties%rowtype;
   v_cell jsonb;
   v_cost integer;
@@ -1513,14 +1803,17 @@ begin
   update public.tycoon_properties set level = level + 1 where room_id = v_room.id and cell_index = v_player.position;
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 将 ' || (v_cell ->> 'name') || ' 升级。', 'property');
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_end_turn(text, uuid, text);
 
 create or replace function public.tycoon_end_turn(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1530,7 +1823,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
   select * into v_player
@@ -1547,14 +1840,17 @@ begin
   end if;
 
   perform public.tycoon_advance_turn(v_room.id, v_player.id);
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_exit_game(text, uuid, text);
 
 create or replace function public.tycoon_exit_game(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1564,7 +1860,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_was_current boolean;
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
@@ -1595,14 +1891,17 @@ begin
     perform public.tycoon_finish_if_needed(v_room.id);
   end if;
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_restart_room(text, uuid, text);
 
 create or replace function public.tycoon_restart_room(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1612,7 +1911,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
   select * into v_player
@@ -1654,14 +1953,17 @@ begin
    where id = v_room.id;
 
   perform public.tycoon_add_log(v_room.id, '房主重开了游戏。', 'host');
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_close_room(text, uuid, text);
 
 create or replace function public.tycoon_close_room(
   p_room_code text,
   p_player_id uuid,
-  p_player_key text
+  p_player_key text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1671,7 +1973,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
   select * into v_player
@@ -1697,15 +1999,18 @@ begin
    where id = v_room.id;
 
   perform public.tycoon_add_log(v_room.id, '房主解散了房间。', 'host');
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
+
+drop function if exists public.tycoon_send_message(text, uuid, text, text);
 
 create or replace function public.tycoon_send_message(
   p_room_code text,
   p_player_id uuid,
   p_player_key text,
-  p_content text
+  p_content text,
+  p_account_token text default null
 )
 returns jsonb
 language plpgsql
@@ -1715,7 +2020,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_content text;
 begin
   v_content := left(btrim(p_content), 180);
@@ -1750,11 +2055,14 @@ begin
         limit 40
      );
 
-  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key);
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
 $$;
 
+drop function if exists public.account_bind_records(jsonb, jsonb);
+
 create or replace function public.account_bind_records(
+  p_account_token text,
   p_qa_players jsonb default '[]'::jsonb,
   p_tycoon_players jsonb default '[]'::jsonb
 )
@@ -1764,7 +2072,7 @@ security definer
 set search_path = public
 as $$
 declare
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_item jsonb;
   v_player_id uuid;
   v_room_code text;
@@ -1852,14 +2160,18 @@ begin
 end;
 $$;
 
-create or replace function public.account_get_records()
+drop function if exists public.account_get_records();
+
+create or replace function public.account_get_records(
+  p_account_token text
+)
 returns jsonb
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_account_id uuid := auth.uid();
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   if v_account_id is null then
     raise exception 'Login required.';
@@ -1930,28 +2242,28 @@ begin
 end;
 $$;
 
-revoke execute on function public.account_bind_records(jsonb, jsonb) from public, anon, authenticated;
-revoke execute on function public.account_get_records() from public, anon, authenticated;
-grant execute on function public.account_bind_records(jsonb, jsonb) to authenticated;
-grant execute on function public.account_get_records() to authenticated;
+revoke execute on function public.account_session_payload(public.game_accounts) from public, anon, authenticated;
+revoke execute on function public.game_account_id_from_token(text) from public, anon, authenticated;
+grant execute on function public.account_bind_records(text, jsonb, jsonb) to anon, authenticated;
+grant execute on function public.account_get_records(text) to anon, authenticated;
 
 revoke execute on function public.tycoon_default_map() from public, anon, authenticated;
 revoke execute on function public.tycoon_add_log(uuid, text, text) from public, anon, authenticated;
-revoke execute on function public.tycoon_room_bundle(text, uuid, text) from public, anon, authenticated;
+revoke execute on function public.tycoon_room_bundle(text, uuid, text, text) from public, anon, authenticated;
 revoke execute on function public.tycoon_build_final_results(uuid) from public, anon, authenticated;
 revoke execute on function public.tycoon_finish_if_needed(uuid) from public, anon, authenticated;
 revoke execute on function public.tycoon_bankrupt_player(uuid, uuid, text) from public, anon, authenticated;
 revoke execute on function public.tycoon_advance_turn(uuid, uuid) from public, anon, authenticated;
 
-grant execute on function public.tycoon_create_room(text, text, text, integer) to anon, authenticated;
-grant execute on function public.tycoon_get_room(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_join_room(text, text, text) to anon, authenticated;
-grant execute on function public.tycoon_start_game(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_roll_dice(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_buy_property(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_upgrade_property(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_end_turn(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_exit_game(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_restart_room(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_close_room(text, uuid, text) to anon, authenticated;
-grant execute on function public.tycoon_send_message(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_create_room(text, text, text, integer, text) to anon, authenticated;
+grant execute on function public.tycoon_get_room(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_join_room(text, text, text, text) to anon, authenticated;
+grant execute on function public.tycoon_start_game(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_roll_dice(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_buy_property(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_upgrade_property(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_end_turn(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_exit_game(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_restart_room(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_close_room(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_send_message(text, uuid, text, text, text) to anon, authenticated;
