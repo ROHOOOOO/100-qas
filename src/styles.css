@@ -543,6 +543,91 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.tycoon-color-picker,
+.tycoon-row-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tycoon-color-option {
+  position: relative;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.tycoon-color-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tycoon-color-option span,
+.tycoon-row-colors span {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--player-border);
+  border-radius: 50%;
+  background: var(--player-bg);
+}
+
+.tycoon-color-option:has(input:checked) {
+  border-color: var(--player-border);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.tycoon-color-option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.32;
+}
+
+.tycoon-color-option.is-disabled input {
+  cursor: not-allowed;
+}
+
+.tycoon-row-colors {
+  margin-top: 5px;
+  gap: 5px;
+}
+
+.tycoon-row-colors button {
+  display: grid;
+  width: 26px;
+  min-width: 0;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tycoon-row-colors button.is-selected {
+  border-color: var(--player-border);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.tycoon-row-colors button:disabled {
+  opacity: 0.25;
+}
+
+.tycoon-row-colors span {
+  width: 17px;
+  height: 17px;
+}
+
 .tycoon-home-layout {
   display: grid;
   gap: 22px;
@@ -601,9 +686,9 @@ textarea:focus {
 
 .tycoon-game-layout {
   display: grid;
-  grid-template-columns: minmax(720px, 2.35fr) minmax(340px, 0.85fr);
+  grid-template-columns: minmax(0, 3.15fr) minmax(300px, 0.78fr);
   gap: 18px;
-  width: min(1760px, calc(100% - 32px));
+  width: min(1880px, calc(100% - 28px));
   min-height: calc(100vh - 76px);
   margin: 0 auto;
   padding: 12px 0 18px;
@@ -657,8 +742,9 @@ textarea:focus {
 
 .inline-join-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
+  align-items: end;
 }
 
 .tycoon-board-panel {
@@ -674,17 +760,17 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
   grid-template-rows: repeat(9, minmax(0, 1fr));
-  gap: 7px;
-  width: min(100%, calc(100vh - 170px));
-  max-width: 960px;
-  aspect-ratio: 1;
+  gap: 8px;
+  width: min(100%, 1260px);
+  max-width: none;
+  aspect-ratio: 16 / 9;
   margin: auto;
   overflow: visible;
 }
 
 .tycoon-game-layout.is-playing .tycoon-board {
-  width: min(100%, calc(100vh - 210px));
-  max-width: 960px;
+  width: min(100%, 1260px);
+  max-width: none;
 }
 
 .tycoon-board-center {
@@ -710,10 +796,10 @@ textarea:focus {
   align-content: start;
   gap: 4px;
   min-height: 0;
-  padding: 8px;
-  border: 1px solid var(--line);
+  padding: 9px 10px;
+  border: 1px solid #d9dfdc;
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: #f4f6f5;
   overflow: visible;
   cursor: pointer;
   touch-action: manipulation;
@@ -741,19 +827,19 @@ textarea:focus {
 
 .tycoon-cell span {
   color: var(--coral-dark);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 900;
 }
 
 .tycoon-cell strong {
   color: #25332f;
-  font-size: 0.84rem;
+  font-size: 0.94rem;
   line-height: 1.18;
 }
 
 .tycoon-cell small {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   line-height: 1.2;
 }
 
@@ -853,17 +939,13 @@ textarea:focus {
 }
 
 .tycoon-cell-start,
-.tycoon-cell-bonus {
-  background: #fff8e8;
-}
-
+.tycoon-cell-bonus,
 .tycoon-cell-chance,
-.tycoon-cell-airport {
-  background: #edf5fb;
-}
-
-.tycoon-cell-tax {
-  background: #fff1ef;
+.tycoon-cell-airport,
+.tycoon-cell-tax,
+.tycoon-cell-rest {
+  border-color: #cadde0;
+  background: #edf5f6;
 }
 
 .tycoon-tokens {
@@ -1540,12 +1622,14 @@ textarea:focus {
 
 @media (min-width: 1500px) and (min-height: 860px) {
   .tycoon-board {
-    gap: 8px;
-    max-width: 1040px;
+    gap: 10px;
+    width: min(100%, 1420px);
+    max-width: none;
   }
 
   .tycoon-game-layout.is-playing .tycoon-board {
-    max-width: 1040px;
+    width: min(100%, 1420px);
+    max-width: none;
   }
 
   .tycoon-board-center {
@@ -1554,19 +1638,19 @@ textarea:focus {
   }
 
   .tycoon-cell {
-    padding: 9px;
+    padding: 11px 12px;
   }
 
   .tycoon-cell span {
-    font-size: 0.76rem;
+    font-size: 0.82rem;
   }
 
   .tycoon-cell strong {
-    font-size: 0.92rem;
+    font-size: 1.02rem;
   }
 
   .tycoon-cell small {
-    font-size: 0.76rem;
+    font-size: 0.82rem;
   }
 }
 
@@ -1782,6 +1866,7 @@ textarea:focus {
   .tycoon-board {
     width: 100%;
     max-width: 560px;
+    aspect-ratio: 1;
     grid-template-columns: repeat(9, minmax(0, 1fr));
     grid-template-rows: repeat(9, minmax(0, 1fr));
     gap: 3px;
@@ -1790,6 +1875,7 @@ textarea:focus {
   .tycoon-game-layout.is-playing .tycoon-board {
     width: 100%;
     max-width: 560px;
+    aspect-ratio: 1;
   }
 
   .tycoon-board-center {

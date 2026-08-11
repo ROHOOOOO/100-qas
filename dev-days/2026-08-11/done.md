@@ -73,3 +73,21 @@
 - 已更新 `scripts/verify-browser.mjs` 的本地验收步骤，增加点开地点卡片并检查买地/升级/Lv.4 过路费明细。
 - 已运行 `node --check src/app.js`、`node scripts/verify-static.mjs`，结果通过。
 - 本轮内置浏览器尝试重新加载本地 `127.0.0.1` 页面时被浏览器安全策略拦截，因此未执行新的图形化浏览器验收。
+- 已发布 Friends Tycoon 地图 UI 优化到 GitHub Pages，提交 `2ab74a25de146588467f6f09bf1019f43f42a88c`。
+- 已只读抓取线上静态资源确认发布成功：
+  - `src/app.js` 包含 `data-action="tycoon-cell-detail"` 和 `tycoon-rent-grid`。
+  - `src/styles.css` 包含 `.tycoon-cell-popover` 和宽屏桌面样式。
+- 本轮内置浏览器访问线上页面仍发生超时重置，未完成真实截图验收；后续可用线上地址手动或再次自动截图确认视觉细节。
+- 确认并继续优化 Friends Tycoon 棋盘呈现：
+  - 桌面端棋盘改为横向长方形，利用横向空间放大地点卡片。
+  - 手机端保持紧凑地图，只优化点击地点后的详情查看。
+  - 无主地产统一为浅灰色。
+  - 机会、税费、奖金、机场、休息等事件格统一为同一种浅色。
+  - 玩家颜色限定为 6 个柔和预设色，开局前可选，已占用颜色不可重复选择。
+  - 玩家地产颜色跟随玩家代表色，土地释放后恢复无主色。
+- 更新 `src/app.js`，新增 Friends Tycoon 玩家颜色选择、占用颜色禁用、本地与线上 RPC 参数兼容兜底。
+- 更新 `src/styles.css`，新增桌面横向棋盘比例、宽屏卡片尺寸和颜色选择控件样式。
+- 更新 `supabase/schema.sql`，新增 `tycoon_players.color_id`、颜色选择辅助函数和 `tycoon_update_player_color` RPC。
+- 更新 `scripts/verify-static.mjs`，加入地图比例、颜色选择控件和 Supabase 颜色字段检查。
+- 已运行 `node --check src/app.js` 与 `node scripts/verify-static.mjs`，结果通过。
+- 本地图形化验收尝试打开 `file://` 页面时被内置浏览器 URL 策略拦截，因此本轮仍需要线上或手动截图确认最终视觉效果。

@@ -35,6 +35,9 @@
 - Friends Games 游戏大厅和 Friends Tycoon 入口已发布到 GitHub Pages。
 - Friends Games 线上验收已通过，最新 100 Q&As 测试房间 `6E22A5` 中 2 位玩家均提交 3 题，结果页正常展示 6 条答案。
 - Friends Tycoon 新回合规则和环形地图已发布到 GitHub Pages，最新提交 `e650b5321cb91ae7932d72f9c8bff34b8d07e830`。
+- Friends Tycoon 地图卡片和地点详情 UI 已发布到 GitHub Pages，最新提交 `2ab74a25de146588467f6f09bf1019f43f42a88c`。
+- Friends Tycoon 已继续调整为桌面横向长方形棋盘、手机紧凑地图、统一事件格颜色和 6 个玩家预设色。
+- 线上玩家颜色同步需要运行最新版 `supabase/schema.sql`，其中包含 `tycoon_players.color_id` 与 `tycoon_update_player_color`。
 - Friends Tycoon 最新线上双玩家验收已通过，测试房间 `70B573` 跑通创建、加入、聊天、开始、掷骰、跳过/自动换人、退出即破产、重新进入恢复和最终结果。
 - Friends Tycoon 房主移除玩家线上专项验收已通过，测试房间 `A33652`。
 - Friends Tycoon 8 秒倒计时超时默认跳过线上专项验收已通过，测试房间 `28CF70`。

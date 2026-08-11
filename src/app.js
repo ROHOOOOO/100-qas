@@ -86,12 +86,12 @@
     { name: "旧金山海湾", type: "property", price: 71000, rent: 6100, upgradeCost: 36000 }
   ];
   var tycoonPlayerColors = [
-    { bg: "#dcefeb", border: "#8bbdb4", ink: "#2e5f58" },
-    { bg: "#f8e2cc", border: "#e4ad78", ink: "#81542a" },
-    { bg: "#e7def6", border: "#bfa6e6", ink: "#60498f" },
-    { bg: "#f8edbe", border: "#d8bd55", ink: "#736323" },
-    { bg: "#dfeaf8", border: "#96b8df", ink: "#355d88" },
-    { bg: "#f5dce3", border: "#dda2b3", ink: "#85495c" }
+    { name: "薄荷绿", bg: "#dcefeb", border: "#8bbdb4", ink: "#2e5f58" },
+    { name: "杏桃橙", bg: "#f8e2cc", border: "#e4ad78", ink: "#81542a" },
+    { name: "鸢尾紫", bg: "#e7def6", border: "#bfa6e6", ink: "#60498f" },
+    { name: "麦芽黄", bg: "#f8edbe", border: "#d8bd55", ink: "#736323" },
+    { name: "雾蓝色", bg: "#dfeaf8", border: "#96b8df", ink: "#355d88" },
+    { name: "莓粉色", bg: "#f5dce3", border: "#dda2b3", ink: "#85495c" }
   ];
 
   function getConfig() {
@@ -686,8 +686,41 @@
     return index < 0 ? 0 : index % tycoonPlayerColors.length;
   }
 
+  function normalizeTycoonColorId(value) {
+    var colorId = Number(value);
+    if (!Number.isInteger(colorId) || colorId < 0 || colorId >= tycoonPlayerColors.length) return null;
+    return colorId;
+  }
+
+  function getTycoonUsedColorIds(room, excludePlayerId) {
+    return getTycoonPresentPlayers(room).reduce(function (used, player) {
+      var colorId = normalizeTycoonColorId(player.colorId);
+      if (player.id !== excludePlayerId && colorId !== null) used.push(colorId);
+      return used;
+    }, []);
+  }
+
+  function getAvailableTycoonColorId(room, preferredColorId, excludePlayerId) {
+    var preferred = normalizeTycoonColorId(preferredColorId);
+    var used = room ? getTycoonUsedColorIds(room, excludePlayerId) : [];
+    if (preferred !== null && used.indexOf(preferred) === -1) return preferred;
+
+    for (var i = 0; i < tycoonPlayerColors.length; i += 1) {
+      if (used.indexOf(i) === -1) return i;
+    }
+
+    return preferred !== null ? preferred : 0;
+  }
+
+  function getTycoonPlayerColorId(room, playerId) {
+    var player = room && room.players ? room.players[playerId] : null;
+    var explicitColorId = normalizeTycoonColorId(player && player.colorId);
+    if (explicitColorId !== null) return explicitColorId;
+    return getTycoonPlayerIndex(room, playerId);
+  }
+
   function getTycoonPlayerColor(room, playerId) {
-    return tycoonPlayerColors[getTycoonPlayerIndex(room, playerId)];
+    return tycoonPlayerColors[getTycoonPlayerColorId(room, playerId)];
   }
 
   function tycoonPlayerStyle(room, playerId) {
@@ -1031,6 +1064,7 @@
       room.players[player.id] = {
         id: player.id,
         nickname: player.nickname,
+        colorId: normalizeTycoonColorId(player.colorId !== undefined ? player.colorId : player.color_id),
         cash: Number(player.cash || 0),
         position: Number(player.position || 0),
         status: player.status || "waiting",
@@ -1581,6 +1615,8 @@
       '      <form class="stack-form" data-action="tycoon-create-room">',
       '        <label for="tycoon-host-nickname">你的昵称</label>',
       '        <input id="tycoon-host-nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="例如 小罗">',
+      '        <label>选择颜色</label>',
+      renderTycoonColorPicker("colorId", 0, null, null),
       '        <label for="tycoon-victory-mode">胜利条件</label>',
       '        <select id="tycoon-victory-mode" name="victoryMode">',
       '          <option value="survivor">最后未破产的人获胜</option>',
@@ -1598,6 +1634,8 @@
       '        <input id="tycoon-room-code" name="roomCode" maxlength="8" autocomplete="off" placeholder="例如 T8K2RA">',
       '        <label for="tycoon-nickname">你的昵称</label>',
       '        <input id="tycoon-nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="例如 阿Z">',
+      '        <label>选择颜色</label>',
+      renderTycoonColorPicker("colorId", 1, null, null),
       '        <button class="secondary-button" type="submit">加入游戏</button>',
       '      </form>',
       recentRooms.length ? renderTycoonRecentRooms(recentRooms) : "",
@@ -1628,6 +1666,42 @@
         ].join("");
       }).join(""),
       '</section>'
+    ].join("");
+  }
+
+  function renderTycoonColorPicker(name, selectedColorId, room, excludePlayerId) {
+    var selected = getAvailableTycoonColorId(room, selectedColorId, excludePlayerId);
+    var used = room ? getTycoonUsedColorIds(room, excludePlayerId) : [];
+    return [
+      '<div class="tycoon-color-picker" role="radiogroup" aria-label="选择玩家颜色">',
+      tycoonPlayerColors.map(function (color, index) {
+        var isUsed = used.indexOf(index) !== -1;
+        var isSelected = selected === index;
+        return [
+          '<label class="tycoon-color-option' + (isUsed && !isSelected ? " is-disabled" : "") + '" style="--player-bg:' + escapeHtml(color.bg) + ';--player-border:' + escapeHtml(color.border) + ';--player-ink:' + escapeHtml(color.ink) + ';">',
+          '  <input type="radio" name="' + escapeHtml(name || "colorId") + '" value="' + index + '" ' + (isSelected ? "checked" : "") + (isUsed && !isSelected ? " disabled" : "") + '>',
+          '  <span title="' + escapeHtml(color.name) + '"></span>',
+          '</label>'
+        ].join("");
+      }).join(""),
+      '</div>'
+    ].join("");
+  }
+
+  function renderTycoonColorButtons(room, player) {
+    var selected = getTycoonPlayerColorId(room, player.id);
+    var used = getTycoonUsedColorIds(room, player.id);
+    return [
+      '<div class="tycoon-row-colors" aria-label="开局前选择颜色">',
+      tycoonPlayerColors.map(function (color, index) {
+        var disabled = used.indexOf(index) !== -1;
+        return [
+          '<button class="' + (selected === index ? "is-selected" : "") + '" data-action="tycoon-set-color" data-color-id="' + index + '" data-player-id="' + escapeHtml(player.id) + '" type="button" ' + (disabled ? "disabled" : "") + ' title="' + escapeHtml(color.name) + '" style="--player-bg:' + escapeHtml(color.bg) + ';--player-border:' + escapeHtml(color.border) + ';--player-ink:' + escapeHtml(color.ink) + ';">',
+          '  <span></span>',
+          '</button>'
+        ].join("");
+      }).join(""),
+      '</div>'
     ].join("");
   }
 
@@ -1676,6 +1750,7 @@
       '  <h2>加入这局 Friends Tycoon</h2>',
       '  <form class="inline-join-form" data-action="tycoon-join-room" data-room-code="' + escapeHtml(room.code) + '">',
       '    <input name="nickname" maxlength="20" autocomplete="nickname" placeholder="填写昵称">',
+      renderTycoonColorPicker("colorId", null, room, null),
       '    <button class="primary-button" type="submit">加入</button>',
       '  </form>',
       '</section>'
@@ -1949,11 +2024,13 @@
         var isCurrent = currentPlayer && player.id === currentPlayer.id;
         var isTurn = room.currentPlayerId === player.id;
         var canRemove = isCurrentHost && !isCurrent && player.status !== "bankrupt" && (room.status === "lobby" || room.status === "active");
+        var canChangeColor = isCurrent && room.status === "lobby" && player.status !== "bankrupt";
         return [
           '<div class="tycoon-player-row' + (isCurrent ? " is-current" : "") + (isTurn ? " is-turn" : "") + '" style="' + escapeHtml(tycoonPlayerStyle(room, player.id)) + '">',
           '  <div>',
           '    <strong>' + escapeHtml(player.nickname) + (isTycoonHost(room, player) ? ' <span>房主</span>' : '') + '</strong>',
           '    <small>' + escapeHtml(tycoonPlayerStatusText(player.status)) + ' · ' + escapeHtml(getTycoonCell(player.position).name) + '</small>',
+          canChangeColor ? renderTycoonColorButtons(room, player) : "",
           '  </div>',
           '  <div>',
           '    <strong>' + formatMoney(player.cash) + '</strong>',
@@ -3213,7 +3290,7 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function createTycoonRoom(nickname, victoryMode, turnLimit) {
+  async function createTycoonRoom(nickname, victoryMode, turnLimit, colorId) {
     var trimmed = String(nickname || "").trim();
     if (!trimmed) {
       showToast("先填一个昵称。");
@@ -3222,16 +3299,26 @@
 
     var safeVictoryMode = victoryMode === "turnLimit" ? "turnLimit" : "survivor";
     var safeTurnLimit = Math.min(Math.max(Number(turnLimit || 30), 10), 60);
+    var safeColorId = getAvailableTycoonColorId(null, colorId, null);
 
     if (isSupabaseMode()) {
       try {
         var playerKey = makePlayerKey();
-        var bundle = await supabaseRpc("tycoon_create_room", withAccountToken({
+        var payload = withAccountToken({
           p_nickname: trimmed,
           p_player_key: playerKey,
           p_victory_mode: safeVictoryMode,
-          p_turn_limit: safeTurnLimit
-        }));
+          p_turn_limit: safeTurnLimit,
+          p_color_id: safeColorId
+        });
+        var bundle;
+        try {
+          bundle = await supabaseRpc("tycoon_create_room", payload);
+        } catch (colorError) {
+          delete payload.p_color_id;
+          bundle = await supabaseRpc("tycoon_create_room", payload);
+          showToast("线上颜色字段还没升级，已先使用默认颜色。");
+        }
         var onlineRoom = normalizeOnlineTycoonRoom(bundle);
         if (!onlineRoom || !bundle.currentPlayerId) throw new Error("Tycoon room was not created.");
         cacheTycoonRoom(onlineRoom);
@@ -3255,6 +3342,7 @@
     var host = {
       id: makeId("tycoon-player"),
       nickname: trimmed,
+      colorId: safeColorId,
       cash: TYCOON_START_CASH,
       position: 0,
       status: "waiting",
@@ -3290,7 +3378,7 @@
     setRoute("tycoon/room/" + room.code);
   }
 
-  async function joinTycoonRoomByCode(code, nickname) {
+  async function joinTycoonRoomByCode(code, nickname, colorId) {
     var roomCode = String(code || "").trim().toUpperCase();
     var trimmed = String(nickname || "").trim();
     if (!roomCode) {
@@ -3301,15 +3389,25 @@
       showToast("先填一个昵称。");
       return;
     }
+    var safeColorId = normalizeTycoonColorId(colorId);
 
     if (isSupabaseMode()) {
       try {
         var playerKey = makePlayerKey();
-        var bundle = await supabaseRpc("tycoon_join_room", withAccountToken({
+        var payload = withAccountToken({
           p_room_code: roomCode,
           p_nickname: trimmed,
-          p_player_key: playerKey
-        }));
+          p_player_key: playerKey,
+          p_color_id: safeColorId
+        });
+        var bundle;
+        try {
+          bundle = await supabaseRpc("tycoon_join_room", payload);
+        } catch (colorError) {
+          delete payload.p_color_id;
+          bundle = await supabaseRpc("tycoon_join_room", payload);
+          showToast("线上颜色字段还没升级，已先使用默认颜色。");
+        }
         var onlineRoom = normalizeOnlineTycoonRoom(bundle);
         if (!onlineRoom || !bundle.currentPlayerId) throw new Error("Tycoon player was not created.");
         cacheTycoonRoom(onlineRoom);
@@ -3330,10 +3428,10 @@
       showToast("没有找到这个 Friends Tycoon 房间。");
       return;
     }
-    joinTycoonRoomLocal(state, room, trimmed);
+    joinTycoonRoomLocal(state, room, trimmed, safeColorId);
   }
 
-  function joinTycoonRoomLocal(state, room, nickname) {
+  function joinTycoonRoomLocal(state, room, nickname, colorId) {
     room = normalizeTycoonRoom(room);
     if (room.status !== "lobby") {
       showToast("游戏已经开始，暂时不能中途加入。");
@@ -3348,6 +3446,7 @@
     var player = {
       id: makeId("tycoon-player"),
       nickname: nickname,
+      colorId: getAvailableTycoonColorId(room, colorId, null),
       cash: TYCOON_START_CASH,
       position: 0,
       status: "waiting",
@@ -3657,6 +3756,30 @@
     saveAndRenderTycoon(bundle.state);
   }
 
+  async function setTycoonPlayerColor(playerId, colorId) {
+    var safeColorId = normalizeTycoonColorId(colorId);
+    if (safeColorId === null) return;
+
+    if (isSupabaseMode()) {
+      try {
+        await runTycoonRpc("tycoon_update_player_color", {
+          p_color_id: safeColorId
+        });
+      } catch (error) {
+        showToast("颜色保存失败，可能需要先运行最新版 SQL。");
+      }
+      return;
+    }
+
+    var bundle = getLocalTycoonRoomAndPlayer();
+    if (!bundle || !bundle.player || bundle.room.status !== "lobby") return;
+    var target = bundle.room.players[playerId] || bundle.player;
+    if (!target || target.id !== bundle.player.id || target.status === "bankrupt") return;
+
+    target.colorId = getAvailableTycoonColorId(bundle.room, safeColorId, target.id);
+    saveAndRenderTycoon(bundle.state);
+  }
+
   async function restartTycoonRoom() {
     if (isSupabaseMode()) {
       try {
@@ -3820,6 +3943,7 @@
       render({ skipOnlineSync: true });
     }
     if (action === "tycoon-cell-detail") toggleTycoonCellDetail(target.getAttribute("data-cell-index"));
+    if (action === "tycoon-set-color") setTycoonPlayerColor(target.getAttribute("data-player-id"), target.getAttribute("data-color-id"));
     if (action === "tycoon-remove-player") {
       showTycoonConfirm(
         "确认移除玩家吗?",
@@ -3913,7 +4037,8 @@
       createTycoonRoom(
         String(createData.get("nickname") || ""),
         String(createData.get("victoryMode") || "survivor"),
-        Number(createData.get("turnLimit") || 30)
+        Number(createData.get("turnLimit") || 30),
+        createData.get("colorId")
       );
     }
 
@@ -3921,14 +4046,17 @@
       var joinData = new FormData(form);
       joinTycoonRoomByCode(
         String(joinData.get("roomCode") || ""),
-        String(joinData.get("nickname") || "")
+        String(joinData.get("nickname") || ""),
+        joinData.get("colorId")
       );
     }
 
     if (action === "tycoon-join-room") {
+      var roomJoinData = new FormData(form);
       joinTycoonRoomByCode(
         form.getAttribute("data-room-code"),
-        String(new FormData(form).get("nickname") || "")
+        String(roomJoinData.get("nickname") || ""),
+        roomJoinData.get("colorId")
       );
     }
 

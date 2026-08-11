@@ -801,7 +801,16 @@ begin
 end $$;
 
 alter table public.tycoon_players
-add column if not exists account_id uuid;
+add column if not exists account_id uuid,
+add column if not exists color_id integer;
+
+do $$
+begin
+  alter table public.tycoon_players drop constraint if exists tycoon_players_color_id_check;
+  alter table public.tycoon_players
+    add constraint tycoon_players_color_id_check
+    check (color_id is null or color_id between 0 and 5);
+end $$;
 
 do $$
 begin
@@ -983,6 +992,7 @@ begin
         jsonb_build_object(
           'id', p.id,
           'nickname', p.nickname,
+          'colorId', p.color_id,
           'cash', p.cash,
           'position', p.position,
           'status', p.status,
@@ -1333,13 +1343,51 @@ begin
 end;
 $$;
 
+create or replace function public.tycoon_pick_color_id(
+  p_room_id uuid,
+  p_preferred_color_id integer default null,
+  p_exclude_player_id uuid default null
+)
+returns integer
+language sql
+security definer
+set search_path = public
+as $$
+  with candidates as (
+    select candidate, min(priority) as priority
+      from unnest(array[
+        case when p_preferred_color_id between 0 and 5 then p_preferred_color_id else null end,
+        0, 1, 2, 3, 4, 5
+      ]) with ordinality as color_options(candidate, priority)
+     where candidate is not null
+     group by candidate
+  )
+  select coalesce((
+    select c.candidate
+      from candidates c
+     where not exists (
+       select 1
+         from public.tycoon_players p
+        where p.room_id = p_room_id
+          and p.status <> 'bankrupt'
+          and p.color_id = c.candidate
+          and (p_exclude_player_id is null or p.id <> p_exclude_player_id)
+     )
+     order by c.priority
+     limit 1
+  ), 0);
+$$;
+
 drop function if exists public.tycoon_create_room(text, text, text, integer);
+drop function if exists public.tycoon_create_room(text, text, text, integer, text);
+drop function if exists public.tycoon_create_room(text, text, text, integer, integer, text);
 
 create or replace function public.tycoon_create_room(
   p_nickname text,
   p_player_key text,
   p_victory_mode text default 'survivor',
   p_turn_limit integer default 30,
+  p_color_id integer default null,
   p_account_token text default null
 )
 returns jsonb
@@ -1379,8 +1427,8 @@ begin
     end;
   end loop;
 
-  insert into public.tycoon_players (room_id, nickname, player_key, account_id)
-  values (v_room.id, v_nickname, p_player_key, v_account_id)
+  insert into public.tycoon_players (room_id, nickname, player_key, account_id, color_id)
+  values (v_room.id, v_nickname, p_player_key, v_account_id, public.tycoon_pick_color_id(v_room.id, p_color_id))
   returning *
   into v_player;
 
@@ -1422,11 +1470,14 @@ end;
 $$;
 
 drop function if exists public.tycoon_join_room(text, text, text);
+drop function if exists public.tycoon_join_room(text, text, text, text);
+drop function if exists public.tycoon_join_room(text, text, text, integer, text);
 
 create or replace function public.tycoon_join_room(
   p_room_code text,
   p_nickname text,
   p_player_key text,
+  p_color_id integer default null,
   p_account_token text default null
 )
 returns jsonb
@@ -1482,6 +1533,7 @@ begin
     if found then
       update public.tycoon_players
          set nickname = v_nickname,
+             color_id = public.tycoon_pick_color_id(v_room.id, p_color_id, v_player.id),
              updated_at = now()
        where id = v_player.id
        returning *
@@ -1491,17 +1543,63 @@ begin
     end if;
   end if;
 
-  insert into public.tycoon_players (room_id, nickname, player_key, account_id)
-  values (v_room.id, v_nickname, p_player_key, v_account_id)
+  insert into public.tycoon_players (room_id, nickname, player_key, account_id, color_id)
+  values (v_room.id, v_nickname, p_player_key, v_account_id, public.tycoon_pick_color_id(v_room.id, p_color_id))
   on conflict (room_id, player_key)
   do update set
     nickname = excluded.nickname,
+    color_id = public.tycoon_pick_color_id(v_room.id, excluded.color_id, public.tycoon_players.id),
     account_id = coalesce(public.tycoon_players.account_id, excluded.account_id),
     updated_at = now()
   returning *
   into v_player;
 
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 加入了游戏。', 'join');
+
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
+end;
+$$;
+
+drop function if exists public.tycoon_update_player_color(text, uuid, text, integer, text);
+
+create or replace function public.tycoon_update_player_color(
+  p_room_code text,
+  p_player_id uuid,
+  p_player_key text,
+  p_color_id integer,
+  p_account_token text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.tycoon_rooms%rowtype;
+  v_player public.tycoon_players%rowtype;
+begin
+  select *
+    into v_room
+    from public.tycoon_rooms
+   where code = upper(trim(p_room_code))
+   for update;
+
+  if not found then
+    raise exception 'Room not found.';
+  end if;
+
+  if v_room.status <> 'lobby' then
+    raise exception 'Color can only be changed before the game starts.';
+  end if;
+
+  v_player := public.tycoon_require_player(v_room.id, p_player_id, p_player_key, p_account_token);
+
+  update public.tycoon_players
+     set color_id = public.tycoon_pick_color_id(v_room.id, p_color_id, v_player.id),
+         updated_at = now()
+   where id = v_player.id
+   returning *
+   into v_player;
 
   return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
@@ -2506,10 +2604,12 @@ revoke execute on function public.tycoon_build_final_results(uuid) from public, 
 revoke execute on function public.tycoon_finish_if_needed(uuid) from public, anon, authenticated;
 revoke execute on function public.tycoon_bankrupt_player(uuid, uuid, text) from public, anon, authenticated;
 revoke execute on function public.tycoon_advance_turn(uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.tycoon_pick_color_id(uuid, integer, uuid) from public, anon, authenticated;
 
-grant execute on function public.tycoon_create_room(text, text, text, integer, text) to anon, authenticated;
+grant execute on function public.tycoon_create_room(text, text, text, integer, integer, text) to anon, authenticated;
 grant execute on function public.tycoon_get_room(text, uuid, text, text) to anon, authenticated;
-grant execute on function public.tycoon_join_room(text, text, text, text) to anon, authenticated;
+grant execute on function public.tycoon_join_room(text, text, text, integer, text) to anon, authenticated;
+grant execute on function public.tycoon_update_player_color(text, uuid, text, integer, text) to anon, authenticated;
 grant execute on function public.tycoon_start_game(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_roll_dice(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_buy_property(text, uuid, text, text) to anon, authenticated;

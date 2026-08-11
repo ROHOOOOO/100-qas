@@ -51,7 +51,9 @@ assert(appJs.includes('data-action="tycoon-exit"'), "Tycoon must expose a player
 assert(appJs.includes('data-action="tycoon-skip-action"'), "Tycoon must expose a skip action after roll decisions.");
 assert(appJs.includes('data-action="tycoon-remove-player"'), "Tycoon host must be able to remove players.");
 assert(appJs.includes('data-action="tycoon-cell-detail"'), "Tycoon map cells must expose tap/click detail panels.");
+assert(appJs.includes('data-action="tycoon-set-color"'), "Tycoon players must be able to select a preset color before the game starts.");
 assert(appJs.includes("renderTycoonCellDetail"), "Tycoon must render buy, upgrade, and rent details on demand.");
+assert(appJs.includes("renderTycoonColorPicker"), "Tycoon setup must render preset player color choices.");
 assert(appJs.includes("isTextEntryActive"), "Tycoon polling must avoid interrupting active text input.");
 assert(appJs.includes("tycoon_auto_skip_action"), "Tycoon must auto-skip expired buy/upgrade decisions online.");
 assert(appJs.includes("bankruptTycoonPlayer"), "Tycoon must convert exits and negative cash into bankruptcy.");
@@ -103,6 +105,8 @@ assert(stylesCss.includes(".tycoon-rules"), "Friends Tycoon rules styles must ex
 assert(stylesCss.includes(".tycoon-board"), "Friends Tycoon board styles must exist.");
 assert(stylesCss.includes(".tycoon-board-center"), "Friends Tycoon board must support a ring-map center panel.");
 assert(stylesCss.includes(".tycoon-cell-popover"), "Friends Tycoon map cells must support hover/tap detail popovers.");
+assert(stylesCss.includes("aspect-ratio: 16 / 9"), "Friends Tycoon desktop board must use a wide rectangular map.");
+assert(stylesCss.includes(".tycoon-color-picker"), "Friends Tycoon must style preset color selection controls.");
 assert(stylesCss.includes("min-width: 1500px"), "Friends Tycoon must enlarge the board on wide desktop screens.");
 assert(stylesCss.includes(".tycoon-feed-tabs"), "Friends Tycoon mobile layout must use feed tabs.");
 assert(stylesCss.includes(".tycoon-chat-panel"), "Friends Tycoon chat panel styles must exist.");
@@ -135,6 +139,9 @@ assert(supabaseSql.includes("create table if not exists public.tycoon_players"),
 assert(supabaseSql.includes("create table if not exists public.tycoon_messages"), "Supabase SQL must create tycoon_messages.");
 assert(supabaseSql.includes("tycoon_roll_dice"), "Supabase SQL must define tycoon_roll_dice.");
 assert(supabaseSql.includes("pending_action"), "Supabase SQL must track pending Tycoon decisions.");
+assert(supabaseSql.includes("color_id"), "Supabase SQL must store Tycoon player color choices.");
+assert(supabaseSql.includes("tycoon_pick_color_id"), "Supabase SQL must prevent duplicate Tycoon colors where possible.");
+assert(supabaseSql.includes("tycoon_update_player_color"), "Supabase SQL must let players update colors before the game starts.");
 assert(supabaseSql.includes("tycoon_skip_action"), "Supabase SQL must define tycoon_skip_action.");
 assert(supabaseSql.includes("tycoon_auto_skip_action"), "Supabase SQL must define tycoon_auto_skip_action.");
 assert(supabaseSql.includes("tycoon_remove_player"), "Supabase SQL must define tycoon_remove_player.");
