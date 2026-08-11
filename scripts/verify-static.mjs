@@ -104,8 +104,8 @@ assert(supabaseSql.includes("create table if not exists public.qa_players"), "Su
 assert(supabaseSql.includes("create table if not exists public.qa_answers"), "Supabase SQL must create qa_answers.");
 assert(supabaseSql.includes("create table if not exists public.game_accounts"), "Supabase SQL must create lightweight Friends Games accounts.");
 assert(supabaseSql.includes("create table if not exists public.game_account_sessions"), "Supabase SQL must create account sessions.");
-assert(supabaseSql.includes("crypt(p_password"), "Supabase SQL must hash account passwords.");
-assert(supabaseSql.includes("digest(p_account_token"), "Supabase SQL must hash and verify account tokens.");
+assert(supabaseSql.includes("extensions.crypt(p_password"), "Supabase SQL must hash account passwords.");
+assert(supabaseSql.includes("extensions.digest(p_account_token"), "Supabase SQL must hash and verify account tokens.");
 assert(supabaseSql.includes("account_register"), "Supabase SQL must define account_register.");
 assert(supabaseSql.includes("account_login"), "Supabase SQL must define account_login.");
 assert(!supabaseSql.includes("auth.users"), "Supabase SQL must not depend on Supabase Auth users for Friends Games accounts.");

@@ -148,7 +148,7 @@ begin
   select s.account_id
     into v_account_id
     from public.game_account_sessions s
-   where s.token_hash = encode(digest(p_account_token, 'sha256'), 'hex')
+   where s.token_hash = encode(extensions.digest(p_account_token, 'sha256'), 'hex')
      and s.expires_at > now();
 
   return v_account_id;
@@ -164,11 +164,11 @@ security definer
 set search_path = public
 as $$
 declare
-  v_token text := encode(gen_random_bytes(32), 'hex');
+  v_token text := encode(extensions.gen_random_bytes(32), 'hex');
   v_expires_at timestamptz := now() + interval '90 days';
 begin
   insert into public.game_account_sessions (token_hash, account_id, expires_at)
-  values (encode(digest(v_token, 'sha256'), 'hex'), p_account.id, v_expires_at);
+  values (encode(extensions.digest(v_token, 'sha256'), 'hex'), p_account.id, v_expires_at);
 
   return jsonb_build_object(
     'account', jsonb_build_object(
@@ -206,7 +206,7 @@ begin
   end if;
 
   insert into public.game_accounts (username, username_key, password_hash)
-  values (v_username, v_username_key, crypt(p_password, gen_salt('bf')))
+  values (v_username, v_username_key, extensions.crypt(p_password, extensions.gen_salt('bf')))
   returning *
   into v_account;
 
@@ -235,7 +235,7 @@ begin
     from public.game_accounts
    where username_key = v_username_key;
 
-  if not found or v_account.password_hash <> crypt(coalesce(p_password, ''), v_account.password_hash) then
+  if not found or v_account.password_hash <> extensions.crypt(coalesce(p_password, ''), v_account.password_hash) then
     raise exception 'Invalid username or password.';
   end if;
 
@@ -258,7 +258,7 @@ as $$
 begin
   if coalesce(btrim(p_account_token), '') <> '' then
     delete from public.game_account_sessions
-     where token_hash = encode(digest(p_account_token, 'sha256'), 'hex');
+     where token_hash = encode(extensions.digest(p_account_token, 'sha256'), 'hex');
   end if;
 
   return jsonb_build_object('ok', true);

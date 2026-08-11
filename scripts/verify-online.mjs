@@ -186,6 +186,83 @@ async function verifyOnlineTycoon(pageA, browser) {
   };
 }
 
+async function verifyOnlineAccount(browser) {
+  const username = `acct${Date.now().toString(36).slice(-8)}`;
+  const password = `pw${Date.now().toString(36).slice(-6)}`;
+  const contextA = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+  const pageA = await contextA.newPage();
+  collectPageHealth(pageA, "account-player-a", health);
+
+  await pageA.goto(`${appBaseUrl}#account`, { waitUntil: "domcontentloaded" });
+  await pageA.getByRole("heading", { name: "登录或注册" }).waitFor({ timeout: 20000 });
+  assert(
+    await pageA.locator("#account-username").getAttribute("placeholder") === "2-20位，支持中文/英文/数字/下划线",
+    "Account username placeholder should show the username rules."
+  );
+  assert(
+    await pageA.locator("#account-password").getAttribute("placeholder") === "至少4位，请勿使用重要账号密码",
+    "Account password placeholder should show the password rules."
+  );
+  await pageA.locator("#account-username").fill(username);
+  await pageA.locator("#account-password").fill(password);
+  await pageA.getByRole("button", { name: "注册新账号" }).click();
+  await pageA.getByRole("heading", { name: "我的记录" }).waitFor({ timeout: 30000 });
+
+  await pageA.goto(`${appBaseUrl}#qa/create`, { waitUntil: "domcontentloaded" });
+  await pageA.getByRole("heading", { name: "创建房间" }).waitFor({ timeout: 20000 });
+  await pageA.getByRole("button", { name: "自定义题库" }).click();
+  await pageA.getByLabel("粘贴题目").fill("1. 账号跨设备测试问题?");
+  await pageA.getByText("已识别 1 题，可以生成房间").waitFor({ timeout: 15000 });
+  await pageA.getByRole("button", { name: "生成房间" }).click();
+  await pageA.waitForURL(/#qa\/room\//, { timeout: 20000 });
+  await joinAndSubmit(pageA, "账号验收QA", "账号答案", 1);
+  const qaRoomCode = pageA.url().split("#qa/room/")[1];
+  assert(Boolean(qaRoomCode), "Account QA room URL should include a room code.");
+
+  await pageA.goto(`${appBaseUrl}#tycoon`, { waitUntil: "domcontentloaded" });
+  await pageA.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 20000 });
+  await pageA.locator("#tycoon-host-nickname").fill("账号验收Tycoon");
+  await pageA.getByRole("button", { name: "创建 Friends Tycoon 房间" }).click();
+  await pageA.waitForURL(/#tycoon\/room\//, { timeout: 30000 });
+  const tycoonRoomCode = pageA.url().split("#tycoon/room/")[1];
+  assert(Boolean(tycoonRoomCode), "Account Tycoon room URL should include a room code.");
+
+  await pageA.goto(`${appBaseUrl}#account`, { waitUntil: "domcontentloaded" });
+  await pageA.getByRole("heading", { name: "我的记录" }).waitFor({ timeout: 20000 });
+  await pageA.getByText(`Room ${qaRoomCode}`).waitFor({ timeout: 30000 });
+  await pageA.getByText(`Room ${tycoonRoomCode}`).waitFor({ timeout: 30000 });
+
+  const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+  const pageB = await contextB.newPage();
+  collectPageHealth(pageB, "account-player-b", health);
+
+  await pageB.goto(`${appBaseUrl}#account`, { waitUntil: "domcontentloaded" });
+  await pageB.getByRole("heading", { name: "登录或注册" }).waitFor({ timeout: 20000 });
+  await pageB.locator("#account-username").fill(username);
+  await pageB.locator("#account-password").fill(password);
+  await pageB.getByRole("button", { name: "登录" }).click();
+  await pageB.getByRole("heading", { name: "我的记录" }).waitFor({ timeout: 30000 });
+  await pageB.getByText(`Room ${qaRoomCode}`).waitFor({ timeout: 30000 });
+  await pageB.getByText(`Room ${tycoonRoomCode}`).waitFor({ timeout: 30000 });
+
+  await pageB.goto(`${appBaseUrl}#qa/room/${qaRoomCode}`, { waitUntil: "domcontentloaded" });
+  await pageB.getByRole("heading", { name: "大家的答案" }).waitFor({ timeout: 30000 });
+  await pageB.getByText("账号答案 1").waitFor({ timeout: 20000 });
+
+  await pageB.goto(`${appBaseUrl}#tycoon/room/${tycoonRoomCode}`, { waitUntil: "domcontentloaded" });
+  await pageB.getByRole("heading", { name: "Friends Tycoon" }).waitFor({ timeout: 30000 });
+  await pageB.locator(".tycoon-player-list").getByText("账号验收Tycoon").waitFor({ timeout: 30000 });
+
+  return {
+    username,
+    qaRoomCode,
+    tycoonRoomCode,
+    crossDeviceRecordsVisible: true,
+    qaRoomRecovered: true,
+    tycoonRoomRecovered: true
+  };
+}
+
 const { chromium } = loadPlaywright();
 const appUrl = process.env.QA_ONLINE_URL || "https://rohooooo.github.io/100-qas/";
 const appBaseUrl = appUrl.split("#")[0];
@@ -203,6 +280,11 @@ collectPageHealth(pageA, "player-a", health);
 try {
   await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
   assert((await pageA.title()).includes("Friends Games"), "Production page title should identify Friends Games.");
+  await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
+
+  const accountChecks = await verifyOnlineAccount(browser);
+
+  await pageA.goto(appUrl, { waitUntil: "domcontentloaded" });
   await pageA.getByRole("heading", { name: "Friends Games" }).waitFor({ timeout: 20000 });
 
   const tycoonChecks = await verifyOnlineTycoon(pageA, browser);
@@ -294,6 +376,7 @@ try {
     ok: true,
     appUrl,
     roomCode,
+    account: accountChecks,
     tycoon: tycoonChecks,
     checks: {
       title: await pageA.title(),
