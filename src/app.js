@@ -1256,7 +1256,6 @@
 
   async function loadAccountRecords() {
     if (!isSupabaseMode() || !isLoggedIn()) return localAccountRecords();
-    if (accountRecordsCache) return accountRecordsCache;
     accountRecordsCache = await supabaseRpc("account_get_records", withAccountToken({}));
     return accountRecordsCache || { qa: [], tycoon: [] };
   }
