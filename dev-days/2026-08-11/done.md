@@ -44,3 +44,18 @@
 - 更新 `docs/friends-tycoon-requirements.md` 与 `docs/technical-architecture.md` 记录新规则。
 - 已运行 `node --check src/app.js`、`node scripts/verify-static.mjs`。
 - 已运行本地浏览器验收 `node scripts/verify-browser.mjs`，覆盖 Tycoon 新流程、规则弹窗、Q&A/PDF 回归。
+- 用户已在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`，返回 `Success. No rows returned.`。
+- 已发布 Friends Tycoon 回合和布局更新到 GitHub Pages：
+  - 首次发布提交：`14cfbc007737f16981a5d372bbc70d155e644888`。
+  - 验收脚本适配新自动换人规则后发布提交：`e650b5321cb91ae7932d72f9c8bff34b8d07e830`。
+- 已执行线上完整验收 `QA_ONLINE_URL='https://rohooooo.github.io/100-qas/?qa_check=1786431160000' node scripts/verify-online.mjs`，结果通过。
+- 线上验收覆盖：
+  - 朋友账号注册/登录与跨设备记录恢复。
+  - 100 Q&As 自定义 3 题房间、双玩家提交、结果页、PDF 导出页。
+  - Friends Tycoon 双玩家创建、加入、聊天、开始、掷骰、自动换人/跳过兼容、退出破产、重新进入恢复、最终结果、聊天结束清空。
+  - 移动端大厅入口可见。
+- 线上验收测试数据：
+  - Q&A 完整流程房间：`A97E13`。
+  - 账号测试账号：`acctmson3lo7`。
+  - 账号记录房间：Q&A `FEF440`、Tycoon `21AF73`。
+  - Tycoon 完整流程房间：`70B573`。

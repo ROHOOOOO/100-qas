@@ -34,11 +34,12 @@
 - 最新规则已改为自定义题库 1 到 100 题，并已通过线上 3 题双玩家验收。
 - Friends Games 游戏大厅和 Friends Tycoon 入口已发布到 GitHub Pages。
 - Friends Games 线上验收已通过，最新 100 Q&As 测试房间 `6E22A5` 中 2 位玩家均提交 3 题，结果页正常展示 6 条答案。
-- Friends Tycoon 线上双玩家验收已通过，测试房间 `5D1C74` 跑通创建、加入、聊天、开始、掷骰、结束回合、退出即破产、重新进入恢复和最终结果。
+- Friends Tycoon 新回合规则和环形地图已发布到 GitHub Pages，最新提交 `e650b5321cb91ae7932d72f9c8bff34b8d07e830`。
+- Friends Tycoon 最新线上双玩家验收已通过，测试房间 `70B573` 跑通创建、加入、聊天、开始、掷骰、跳过/自动换人、退出即破产、重新进入恢复和最终结果。
 - 最新 `supabase/schema.sql` 额外加入“已结束/已解散房间不能再退出”的后端保护；线上页面已先隐藏该入口，方便时可再次运行 SQL 让数据库层同步这条保护。
 - 账号登录/注册已从 Supabase Auth 邮箱方案改为轻量朋友账号名 + 密码方案。
 - 100 Q&As PDF 导出已从“仅打印保存”升级为“直接下载 PDF + 预览兜底 + 打印辅助”。
-- 线上生效前需要再次在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`，然后发布前端并执行线上验收。
+- 最新 `supabase/schema.sql` 已由用户在 Supabase SQL Editor 成功运行，线上验收已通过。
 
 ## 使用流程
 
