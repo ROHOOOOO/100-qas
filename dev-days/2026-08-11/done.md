@@ -10,3 +10,7 @@
 - `100 Q&As` 导出版新增 `下载 PDF`、`打开 PDF 预览`，保留 `打印 / 系统保存`。
 - 自动验收脚本已更新，覆盖朋友账号、placeholder、PDF 直接下载和预览入口。
 - 文档已同步账号与 PDF 导出新方案。
+- 已发布到 GitHub Pages，提交 `af8f84a`。
+- 线上基础验收通过：`100 Q&As` 双玩家房间 `A665B3`、`Friends Tycoon` 房间 `210D1B`、PDF 下载均跑通。
+- 账号线上验收发现 Supabase `pgcrypto` 扩展函数需要显式使用 `extensions` schema，已修复 `supabase/schema.sql`。
+- 已再次发布 SQL 修复和账号验收脚本，提交 `feea84d`。
