@@ -91,3 +91,4 @@
 - 更新 `scripts/verify-static.mjs`，加入地图比例、颜色选择控件和 Supabase 颜色字段检查。
 - 已运行 `node --check src/app.js` 与 `node scripts/verify-static.mjs`，结果通过。
 - 本地图形化验收尝试打开 `file://` 页面时被内置浏览器 URL 策略拦截，因此本轮仍需要线上或手动截图确认最终视觉效果。
+- 已发布 Friends Tycoon 横向棋盘和颜色收敛方案到 GitHub Pages，提交 `da6b39cbcdc663c2975c532779a8a33228bea26e`。
