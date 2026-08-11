@@ -757,6 +757,9 @@ create table if not exists public.tycoon_rooms (
   current_player_id uuid,
   turn_phase text not null default 'roll' check (turn_phase in ('roll', 'action', 'finished', 'closed')),
   last_dice integer check (last_dice is null or last_dice between 1 and 6),
+  pending_action text check (pending_action is null or pending_action in ('buy', 'upgrade')),
+  action_cell_index integer check (action_cell_index is null or action_cell_index between 0 and 31),
+  action_deadline timestamptz,
   map jsonb not null default public.tycoon_default_map(),
   final_results jsonb,
   created_at timestamptz not null default now(),
@@ -779,6 +782,23 @@ create table if not exists public.tycoon_players (
 
 alter table public.tycoon_rooms
 add column if not exists owner_account_id uuid;
+
+alter table public.tycoon_rooms
+add column if not exists pending_action text,
+add column if not exists action_cell_index integer,
+add column if not exists action_deadline timestamptz;
+
+do $$
+begin
+  alter table public.tycoon_rooms drop constraint if exists tycoon_rooms_pending_action_check;
+  alter table public.tycoon_rooms drop constraint if exists tycoon_rooms_action_cell_index_check;
+  alter table public.tycoon_rooms
+    add constraint tycoon_rooms_pending_action_check
+    check (pending_action is null or pending_action in ('buy', 'upgrade'));
+  alter table public.tycoon_rooms
+    add constraint tycoon_rooms_action_cell_index_check
+    check (action_cell_index is null or action_cell_index between 0 and 31);
+end $$;
 
 alter table public.tycoon_players
 add column if not exists account_id uuid;
@@ -950,6 +970,9 @@ begin
       'currentPlayerId', v_room.current_player_id,
       'turnPhase', v_room.turn_phase,
       'lastDice', v_room.last_dice,
+      'pendingAction', v_room.pending_action,
+      'actionCellIndex', v_room.action_cell_index,
+      'actionDeadline', v_room.action_deadline,
       'map', v_room.map,
       'finalResults', v_room.final_results,
       'createdAt', v_room.created_at
@@ -1131,6 +1154,9 @@ begin
      set status = 'finished',
          turn_phase = 'finished',
          current_player_id = null,
+         pending_action = null,
+         action_cell_index = null,
+         action_deadline = null,
          final_results = jsonb_build_object(
            'reason', v_reason,
            'winnerId', v_winner_id,
@@ -1255,6 +1281,9 @@ begin
        set current_player_id = v_next_player_id,
            turn_phase = 'roll',
            last_dice = null,
+           pending_action = null,
+           action_cell_index = null,
+           action_deadline = null,
            updated_at = now()
      where id = p_room_id;
 
@@ -1294,6 +1323,9 @@ begin
      set current_player_id = v_next_player_id,
          turn_phase = 'roll',
          last_dice = null,
+         pending_action = null,
+         action_cell_index = null,
+         action_deadline = null,
          updated_at = now()
    where id = p_room_id;
 
@@ -1552,6 +1584,9 @@ begin
          current_player_id = v_first_player_id,
          turn_phase = 'roll',
          last_dice = null,
+         pending_action = null,
+         action_cell_index = null,
+         action_deadline = null,
          final_results = null,
          updated_at = now()
    where id = v_room.id;
@@ -1590,6 +1625,9 @@ declare
   v_new_position integer;
   v_delta integer;
   v_rent integer;
+  v_price integer;
+  v_upgrade_cost integer;
+  v_pending_action text;
 begin
   select *
     into v_room
@@ -1661,9 +1699,23 @@ begin
      for update;
 
     if v_property.owner_player_id is null then
+      v_price := (v_cell ->> 'price')::integer;
       perform public.tycoon_add_log(v_room.id, (v_cell ->> 'name') || ' 暂无主人，可以购买。', 'property');
+      if v_player.cash >= v_price then
+        v_pending_action := 'buy';
+      else
+        perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 现金不够，默认跳过购买。', 'property');
+      end if;
     elsif v_property.owner_player_id = v_player.id then
+      v_upgrade_cost := (v_cell ->> 'upgradeCost')::integer;
       perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 来到自己的 ' || (v_cell ->> 'name') || '。', 'property');
+      if v_property.level >= 4 then
+        perform public.tycoon_add_log(v_room.id, (v_cell ->> 'name') || ' 已经满级，本回合自动结束。', 'property');
+      elsif v_player.cash >= v_upgrade_cost then
+        v_pending_action := 'upgrade';
+      else
+        perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 现金不够，默认跳过升级。', 'property');
+      end if;
     else
       select *
         into v_owner
@@ -1681,12 +1733,16 @@ begin
   if v_player.cash < 0 then
     perform public.tycoon_bankrupt_player(v_room.id, v_player.id, '现金低于 0。');
     perform public.tycoon_advance_turn(v_room.id, v_player.id);
-  else
+  elsif v_pending_action in ('buy', 'upgrade') then
     update public.tycoon_rooms
        set turn_phase = 'action',
+           pending_action = v_pending_action,
+           action_cell_index = v_new_position,
+           action_deadline = now() + make_interval(secs => 8),
            updated_at = now()
      where id = v_room.id;
-    perform public.tycoon_finish_if_needed(v_room.id);
+  else
+    perform public.tycoon_advance_turn(v_room.id, v_player.id);
   end if;
 
   return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
@@ -1725,8 +1781,14 @@ begin
      )
    for update;
 
-  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
+  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action <> 'buy' or v_room.action_cell_index <> v_player.position then
     raise exception 'Cannot buy now.';
+  end if;
+
+  if v_room.action_deadline is not null and now() > v_room.action_deadline then
+    perform public.tycoon_add_log(v_room.id, '倒计时结束，默认跳过购买。', 'skip');
+    perform public.tycoon_advance_turn(v_room.id, v_player.id);
+    return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
   end if;
 
   v_cell := v_room.map -> v_player.position;
@@ -1747,6 +1809,7 @@ begin
   update public.tycoon_players set cash = cash - v_price, updated_at = now() where id = v_player.id;
   update public.tycoon_properties set owner_player_id = v_player.id, level = 1 where room_id = v_room.id and cell_index = v_player.position;
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 买下 ' || (v_cell ->> 'name') || '，等级 1。', 'property');
+  perform public.tycoon_advance_turn(v_room.id, v_player.id);
 
   return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
@@ -1784,8 +1847,14 @@ begin
      )
    for update;
 
-  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
+  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action <> 'upgrade' or v_room.action_cell_index <> v_player.position then
     raise exception 'Cannot upgrade now.';
+  end if;
+
+  if v_room.action_deadline is not null and now() > v_room.action_deadline then
+    perform public.tycoon_add_log(v_room.id, '倒计时结束，默认跳过升级。', 'skip');
+    perform public.tycoon_advance_turn(v_room.id, v_player.id);
+    return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
   end if;
 
   v_cell := v_room.map -> v_player.position;
@@ -1802,6 +1871,7 @@ begin
   update public.tycoon_players set cash = cash - v_cost, updated_at = now() where id = v_player.id;
   update public.tycoon_properties set level = level + 1 where room_id = v_room.id and cell_index = v_player.position;
   perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 将 ' || (v_cell ->> 'name') || ' 升级。', 'property');
+  perform public.tycoon_advance_turn(v_room.id, v_player.id);
 
   return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
 end;
@@ -1835,12 +1905,105 @@ begin
        or (v_account_id is not null and account_id = v_account_id)
      );
 
-  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' then
+  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action is null then
     raise exception 'Cannot end turn now.';
   end if;
 
+  perform public.tycoon_add_log(v_room.id, v_player.nickname || ' 跳过' || case when v_room.pending_action = 'buy' then '购买' else '升级' end || '。', 'skip');
   perform public.tycoon_advance_turn(v_room.id, v_player.id);
   return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
+end;
+$$;
+
+drop function if exists public.tycoon_skip_action(text, uuid, text, text);
+
+create or replace function public.tycoon_skip_action(
+  p_room_code text,
+  p_player_id uuid,
+  p_player_key text,
+  p_reason text default 'manual',
+  p_account_token text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.tycoon_rooms%rowtype;
+  v_player public.tycoon_players%rowtype;
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
+  v_action_text text;
+begin
+  select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
+
+  if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action is null then
+    raise exception 'Cannot skip now.';
+  end if;
+
+  v_action_text := case when v_room.pending_action = 'buy' then '购买' else '升级' end;
+  perform public.tycoon_add_log(
+    v_room.id,
+    case when coalesce(p_reason, '') = 'timeout' then '倒计时结束，默认跳过' else v_player.nickname || ' 跳过' end || v_action_text || '。',
+    'skip'
+  );
+  perform public.tycoon_advance_turn(v_room.id, v_player.id);
+
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
+end;
+$$;
+
+drop function if exists public.tycoon_auto_skip_action(text);
+
+create or replace function public.tycoon_auto_skip_action(
+  p_room_code text,
+  p_account_token text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.tycoon_rooms%rowtype;
+  v_player public.tycoon_players%rowtype;
+  v_action_text text;
+begin
+  select *
+    into v_room
+    from public.tycoon_rooms
+   where code = upper(trim(p_room_code))
+   for update;
+
+  if not found then
+    raise exception 'Room not found.';
+  end if;
+
+  if v_room.status = 'active'
+     and v_room.turn_phase = 'action'
+     and v_room.pending_action is not null
+     and v_room.action_deadline is not null
+     and now() >= v_room.action_deadline then
+    select *
+      into v_player
+      from public.tycoon_players
+     where id = v_room.current_player_id
+       and room_id = v_room.id;
+
+    v_action_text := case when v_room.pending_action = 'buy' then '购买' else '升级' end;
+    perform public.tycoon_add_log(v_room.id, '倒计时结束，默认跳过' || v_action_text || '。', 'skip');
+    perform public.tycoon_advance_turn(v_room.id, v_room.current_player_id);
+  end if;
+
+  return public.tycoon_room_bundle(v_room.code, null, null, p_account_token);
 end;
 $$;
 
@@ -1862,6 +2025,7 @@ declare
   v_player public.tycoon_players%rowtype;
   v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_was_current boolean;
+  v_present_count integer;
 begin
   select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
   select * into v_player
@@ -1885,8 +2049,90 @@ begin
   v_was_current := v_room.current_player_id = v_player.id;
   perform public.tycoon_bankrupt_player(v_room.id, v_player.id, '玩家主动退出。');
 
-  if v_room.status = 'active' and v_was_current then
+  if v_room.status = 'lobby' then
+    select count(*)
+      into v_present_count
+      from public.tycoon_players
+     where room_id = v_room.id
+       and status <> 'bankrupt';
+
+    if v_present_count = 0 then
+      update public.tycoon_rooms
+         set status = 'closed',
+             turn_phase = 'closed',
+             current_player_id = null,
+             pending_action = null,
+             action_cell_index = null,
+             action_deadline = null,
+             updated_at = now()
+       where id = v_room.id;
+      perform public.tycoon_add_log(v_room.id, '房间已无人，自动关闭。', 'host');
+    end if;
+  elsif v_room.status = 'active' and v_was_current then
     perform public.tycoon_advance_turn(v_room.id, v_player.id);
+  else
+    perform public.tycoon_finish_if_needed(v_room.id);
+  end if;
+
+  return public.tycoon_room_bundle(v_room.code, v_player.id, p_player_key, p_account_token);
+end;
+$$;
+
+drop function if exists public.tycoon_remove_player(text, uuid, text, uuid);
+
+create or replace function public.tycoon_remove_player(
+  p_room_code text,
+  p_player_id uuid,
+  p_player_key text,
+  p_target_player_id uuid,
+  p_account_token text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.tycoon_rooms%rowtype;
+  v_player public.tycoon_players%rowtype;
+  v_target public.tycoon_players%rowtype;
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
+  v_was_current boolean;
+begin
+  select * into v_room from public.tycoon_rooms where code = upper(trim(p_room_code)) for update;
+  select * into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     );
+
+  if not found or v_room.host_player_id <> v_player.id then
+    raise exception 'Only host can remove players.';
+  end if;
+
+  if v_room.status not in ('lobby', 'active') then
+    raise exception 'Cannot remove players now.';
+  end if;
+
+  select *
+    into v_target
+    from public.tycoon_players
+   where id = p_target_player_id
+     and room_id = v_room.id
+   for update;
+
+  if not found or v_target.id = v_player.id or v_target.status = 'bankrupt' then
+    raise exception 'Cannot remove this player.';
+  end if;
+
+  v_was_current := v_room.current_player_id = v_target.id;
+  perform public.tycoon_bankrupt_player(v_room.id, v_target.id, '被房主移除。');
+
+  if v_room.status = 'active' and v_was_current then
+    perform public.tycoon_advance_turn(v_room.id, v_target.id);
   else
     perform public.tycoon_finish_if_needed(v_room.id);
   end if;
@@ -1948,6 +2194,9 @@ begin
          current_player_id = null,
          turn_phase = 'roll',
          last_dice = null,
+         pending_action = null,
+         action_cell_index = null,
+         action_deadline = null,
          final_results = null,
          updated_at = now()
    where id = v_room.id;
@@ -1995,6 +2244,9 @@ begin
      set status = 'closed',
          turn_phase = 'closed',
          current_player_id = null,
+         pending_action = null,
+         action_cell_index = null,
+         action_deadline = null,
          updated_at = now()
    where id = v_room.id;
 
@@ -2263,7 +2515,10 @@ grant execute on function public.tycoon_roll_dice(text, uuid, text, text) to ano
 grant execute on function public.tycoon_buy_property(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_upgrade_property(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_end_turn(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_skip_action(text, uuid, text, text, text) to anon, authenticated;
+grant execute on function public.tycoon_auto_skip_action(text, text) to anon, authenticated;
 grant execute on function public.tycoon_exit_game(text, uuid, text, text) to anon, authenticated;
+grant execute on function public.tycoon_remove_player(text, uuid, text, uuid, text) to anon, authenticated;
 grant execute on function public.tycoon_restart_room(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_close_room(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_send_message(text, uuid, text, text, text) to anon, authenticated;

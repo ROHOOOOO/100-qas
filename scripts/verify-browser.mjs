@@ -35,6 +35,7 @@ const tycoonScreenshot = join(tmpdir(), "friends-games-local-tycoon.png");
 const tycoonRoomScreenshot = join(tmpdir(), "friends-games-local-tycoon-room.png");
 const resultsScreenshot = join(tmpdir(), "friends-games-local-results.png");
 const mobileLobbyScreenshot = join(tmpdir(), "friends-games-local-mobile-lobby.png");
+const mobileTycoonRoomScreenshot = join(tmpdir(), "friends-games-local-mobile-tycoon-room.png");
 
 async function launchBrowser() {
   try {
@@ -95,9 +96,14 @@ try {
   await page.locator('[data-action="switch-tycoon-player"]').first().click();
   await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByText("游戏中 · 第 1 回合").first().waitFor();
+  await page.getByRole("button", { name: "游戏规则" }).click();
+  await page.getByRole("heading", { name: "游戏规则" }).waitFor();
+  await page.getByRole("button", { name: "知道了" }).click();
   await page.getByRole("button", { name: "掷骰子" }).click();
   await page.locator(".dice-result").waitFor();
-  await page.getByRole("button", { name: "结束回合" }).click();
+  if (await page.getByRole("button", { name: "跳过" }).count()) {
+    await page.getByRole("button", { name: "跳过" }).click();
+  }
   await page.getByRole("heading", { name: "Tycoon朋友 的回合" }).waitFor();
   await page.locator('[data-action="switch-tycoon-player"]').first().click();
   await page.getByRole("button", { name: "退出游戏" }).click();
@@ -263,6 +269,13 @@ try {
   await waitForToastsToClear(page);
   await page.screenshot({ path: resultsScreenshot, fullPage: false });
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${appUrl}#tycoon/room/${tycoonStateSummary.roomCode}`);
+  await page.getByText("最终结果").waitFor();
+  await page.getByRole("button", { name: "动态" }).waitFor();
+  await page.getByRole("button", { name: "聊天" }).waitFor();
+  await page.screenshot({ path: mobileTycoonRoomScreenshot, fullPage: false });
+
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
   const mobilePage = await mobileContext.newPage();
   await mobilePage.goto(appUrl);
@@ -281,7 +294,8 @@ try {
       tycoon: tycoonScreenshot,
       tycoonRoom: tycoonRoomScreenshot,
       results: resultsScreenshot,
-      mobileLobby: mobileLobbyScreenshot
+      mobileLobby: mobileLobbyScreenshot,
+      mobileTycoonRoom: mobileTycoonRoomScreenshot
     }
   }, null, 2));
 } finally {

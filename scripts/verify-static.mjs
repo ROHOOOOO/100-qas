@@ -48,6 +48,10 @@ assert(appJs.includes("#tycoon/room/"), "Tycoon room links should use the Friend
 assert(appJs.includes('data-action="open-tycoon"'), "App must expose a Friends Tycoon navigation action.");
 assert(appJs.includes('data-action="tycoon-roll"'), "Tycoon must expose a roll action.");
 assert(appJs.includes('data-action="tycoon-exit"'), "Tycoon must expose a player exit action.");
+assert(appJs.includes('data-action="tycoon-skip-action"'), "Tycoon must expose a skip action after roll decisions.");
+assert(appJs.includes('data-action="tycoon-remove-player"'), "Tycoon host must be able to remove players.");
+assert(appJs.includes("isTextEntryActive"), "Tycoon polling must avoid interrupting active text input.");
+assert(appJs.includes("tycoon_auto_skip_action"), "Tycoon must auto-skip expired buy/upgrade decisions online.");
 assert(appJs.includes("bankruptTycoonPlayer"), "Tycoon must convert exits and negative cash into bankruptcy.");
 assert(appJs.includes("TYCOON_MAX_LEVEL = 4"), "Tycoon must keep the level cap at 4.");
 assert(appJs.includes('pageName === "room"'), "App must keep old room route compatibility.");
@@ -95,6 +99,8 @@ assert(stylesCss.includes(".site-nav"), "Friends Games navigation styles must ex
 assert(stylesCss.includes(".game-card"), "Game lobby card styles must exist.");
 assert(stylesCss.includes(".tycoon-rules"), "Friends Tycoon rules styles must exist.");
 assert(stylesCss.includes(".tycoon-board"), "Friends Tycoon board styles must exist.");
+assert(stylesCss.includes(".tycoon-board-center"), "Friends Tycoon board must support a ring-map center panel.");
+assert(stylesCss.includes(".tycoon-feed-tabs"), "Friends Tycoon mobile layout must use feed tabs.");
 assert(stylesCss.includes(".tycoon-chat-panel"), "Friends Tycoon chat panel styles must exist.");
 assert(stylesCss.includes(".account-layout"), "Account page styles must exist.");
 assert(stylesCss.includes(".pdf-document"), "PDF export document styles must exist.");
@@ -124,6 +130,10 @@ assert(supabaseSql.includes("create table if not exists public.tycoon_rooms"), "
 assert(supabaseSql.includes("create table if not exists public.tycoon_players"), "Supabase SQL must create tycoon_players.");
 assert(supabaseSql.includes("create table if not exists public.tycoon_messages"), "Supabase SQL must create tycoon_messages.");
 assert(supabaseSql.includes("tycoon_roll_dice"), "Supabase SQL must define tycoon_roll_dice.");
+assert(supabaseSql.includes("pending_action"), "Supabase SQL must track pending Tycoon decisions.");
+assert(supabaseSql.includes("tycoon_skip_action"), "Supabase SQL must define tycoon_skip_action.");
+assert(supabaseSql.includes("tycoon_auto_skip_action"), "Supabase SQL must define tycoon_auto_skip_action.");
+assert(supabaseSql.includes("tycoon_remove_player"), "Supabase SQL must define tycoon_remove_player.");
 assert(supabaseSql.includes("tycoon_exit_game"), "Supabase SQL must define tycoon_exit_game.");
 assert(supabaseSql.includes("status = 'bankrupt'"), "Supabase SQL must support bankrupt player state.");
 assert(supabaseSql.includes("account_get_records"), "Supabase SQL must define account record lookup.");
@@ -132,6 +142,8 @@ assert(supabaseSql.includes("to anon, authenticated"), "Game RPC grants must all
 assert(tycoonRequirements.includes("玩家上限 6 人"), "Friends Tycoon requirements must include the player cap.");
 assert(tycoonRequirements.includes("32 个格子"), "Friends Tycoon requirements must include the 32-cell map.");
 assert(tycoonRequirements.includes("最多 4 级"), "Friends Tycoon requirements must include the upgrade cap.");
+assert(tycoonRequirements.includes("8 秒"), "Friends Tycoon requirements must include the post-roll countdown.");
+assert(tycoonRequirements.includes("房主可以移除玩家"), "Friends Tycoon requirements must include host removal.");
 assert(tycoonRequirements.includes("聊天区与游戏记录分开"), "Friends Tycoon requirements must keep chat separate from game logs.");
 
 console.log("Static verification passed.");

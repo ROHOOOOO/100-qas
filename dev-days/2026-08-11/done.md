@@ -24,3 +24,23 @@
   - Tycoon 双玩家创建、加入、聊天、开始、掷骰、退出破产、结果恢复。
 - 最终验收测试账号 `acctmsoh4nzu`，账号记录房间：Q&A `D21A24`、Tycoon `34A346`。
 - 最终完整流程测试房间：Q&A PDF `6A3E22`、Tycoon `F1D08C`。
+- 整理并确认 Friends Tycoon 新规则：
+  - 掷骰不自动代操作。
+  - 掷骰后的买地/升级倒计时 8 秒，超时默认跳过。
+  - 买地或升级后立即自动进入下一位玩家。
+  - 本回合买地不能立刻升级。
+  - 房主可移除玩家，退出时自动移交房主。
+  - 破产、退出、被移除后土地释放为无主地。
+- 修复 Tycoon 轮询刷新导致昵称/聊天等输入框被打断的问题：输入时同步数据但不整页重绘。
+- 重构 Tycoon 本地回合逻辑，新增 `pendingAction`、`actionCellIndex`、`actionDeadline`。
+- 新增 Tycoon 主动跳过和超时自动跳过逻辑。
+- 新增房主移除玩家逻辑，本地模式和线上 RPC 均已接线。
+- 重构 Tycoon 页面布局：
+  - 桌面端左侧环形地图 + 中心状态/操作/玩家资产。
+  - 右侧固定当前回合、游戏动态和聊天。
+  - 移动端地图优先，动态/聊天使用 Tab。
+- 新增 Tycoon 游戏规则弹窗。
+- 更新 `supabase/schema.sql`，新增待操作字段、自动跳过 RPC、移除玩家 RPC，并调整买地/升级后自动换人。
+- 更新 `docs/friends-tycoon-requirements.md` 与 `docs/technical-architecture.md` 记录新规则。
+- 已运行 `node --check src/app.js`、`node scripts/verify-static.mjs`。
+- 已运行本地浏览器验收 `node scripts/verify-browser.mjs`，覆盖 Tycoon 新流程、规则弹窗、Q&A/PDF 回归。

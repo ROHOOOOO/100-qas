@@ -146,9 +146,9 @@ async function verifyOnlineTycoon(pageA, browser) {
   await rollButton.click();
   await pageA.locator(".dice-result").waitFor({ timeout: 30000 });
 
-  const endTurnButton = pageA.getByRole("button", { name: "结束回合" });
-  assert(await endTurnButton.isEnabled(), "Host should be able to end the turn after rolling.");
-  await endTurnButton.click();
+  if (await pageA.getByRole("button", { name: "跳过" }).count()) {
+    await pageA.getByRole("button", { name: "跳过" }).click();
+  }
   await pageA.getByRole("heading", { name: "线上大富翁B 的回合" }).waitFor({ timeout: 30000 });
 
   await pageB.reload({ waitUntil: "domcontentloaded" });

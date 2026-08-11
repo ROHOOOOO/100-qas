@@ -176,6 +176,9 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 - `current_player_id`
 - `turn_phase`
 - `last_dice`
+- `pending_action`：当前掷骰后等待玩家选择的动作，取值为 `buy` / `upgrade` / `null`。
+- `action_cell_index`：当前待操作对应的地图格子。
+- `action_deadline`：买地或升级选择的 8 秒截止时间，超时默认跳过。
 
 关键 RPC：
 
@@ -186,6 +189,9 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 - `tycoon_buy_property`
 - `tycoon_upgrade_property`
 - `tycoon_end_turn`
+- `tycoon_skip_action`
+- `tycoon_auto_skip_action`
+- `tycoon_remove_player`
 - `tycoon_restart_room`
 - `tycoon_close_room`
 - `tycoon_send_message`
@@ -194,11 +200,16 @@ Friends Tycoon 使用独立的 `tycoon_*` 表和 RPC，不复用 `qa_*` 表：
 
 - 服务端校验是否轮到当前玩家行动。
 - 掷骰、买地、升级、结算租金和破产应放在同一个 RPC 事务中。
+- `tycoon_roll_dice` 会直接完成移动、强制费用、机会、租金、破产判断，并只在可购买/可升级时设置 `pending_action`。
+- 买地或升级成功后，服务端立即调用换人逻辑；前端不再需要手动“结束回合”。
+- 倒计时结束后，任一在线客户端可以调用 `tycoon_auto_skip_action` 推进房间，避免当前玩家临时离开后卡住。
 - 客户端先定时刷新房间状态；如后续需要更顺滑体验，再接 Supabase Realtime。
 - 玩家身份仍采用 `player_key`：浏览器保存原始 key，服务端通过 `room_id + player_id + player_key` 校验操作权限。
 - 登录账号后，服务端也允许通过 `account_id = game_account_id_from_token(p_account_token)` 找回同一玩家身份。
 - 玩家刷新、关闭页面或闪退后，同一浏览器可通过本地身份 key 恢复到原玩家状态。
 - 玩家主动退出会调用 `tycoon_exit_game`，服务端将其置为 `bankrupt`，释放其地产并在必要时推进回合。
+- 房主移除玩家会调用 `tycoon_remove_player`，被移除玩家按破产处理，名下地产释放为无主地。
+- 房主退出时，服务端自动移交 `host_player_id` 给下一位未破产玩家；没有可移交玩家时关闭或结束房间。
 - 游戏结束后 `tycoon_messages` 会清空，`tycoon_rooms.final_results` 与 `tycoon_logs` 保留最终结果和关键记录。
 
 ## 权限规则
