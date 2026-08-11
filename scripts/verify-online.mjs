@@ -186,6 +186,21 @@ async function verifyOnlineTycoon(pageA, browser) {
   };
 }
 
+async function waitForAccountRecord(page, roomCode, label) {
+  const recordText = `Room ${roomCode}`;
+  try {
+    await page.getByText(recordText).waitFor({ timeout: 10000 });
+    return;
+  } catch (error) {
+    const refreshButton = page.getByRole("button", { name: "刷新记录" });
+    if (await refreshButton.count()) {
+      await refreshButton.click();
+    }
+    await page.getByText(recordText).waitFor({ timeout: 30000 });
+  }
+  assert(await page.getByText(recordText).count() > 0, `${label} account record should be visible.`);
+}
+
 async function verifyOnlineAccount(browser) {
   const username = `acct${Date.now().toString(36).slice(-8)}`;
   const password = `pw${Date.now().toString(36).slice(-6)}`;
@@ -229,8 +244,8 @@ async function verifyOnlineAccount(browser) {
 
   await pageA.goto(`${appBaseUrl}#account`, { waitUntil: "domcontentloaded" });
   await pageA.getByRole("heading", { name: "我的记录" }).waitFor({ timeout: 20000 });
-  await pageA.getByText(`Room ${qaRoomCode}`).waitFor({ timeout: 30000 });
-  await pageA.getByText(`Room ${tycoonRoomCode}`).waitFor({ timeout: 30000 });
+  await waitForAccountRecord(pageA, qaRoomCode, "QA");
+  await waitForAccountRecord(pageA, tycoonRoomCode, "Tycoon");
 
   const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
   const pageB = await contextB.newPage();
@@ -240,10 +255,10 @@ async function verifyOnlineAccount(browser) {
   await pageB.getByRole("heading", { name: "登录或注册" }).waitFor({ timeout: 20000 });
   await pageB.locator("#account-username").fill(username);
   await pageB.locator("#account-password").fill(password);
-  await pageB.getByRole("button", { name: "登录" }).click();
+  await pageB.locator('form[data-action="account-login"] button[type="submit"]').click();
   await pageB.getByRole("heading", { name: "我的记录" }).waitFor({ timeout: 30000 });
-  await pageB.getByText(`Room ${qaRoomCode}`).waitFor({ timeout: 30000 });
-  await pageB.getByText(`Room ${tycoonRoomCode}`).waitFor({ timeout: 30000 });
+  await waitForAccountRecord(pageB, qaRoomCode, "Cross-device QA");
+  await waitForAccountRecord(pageB, tycoonRoomCode, "Cross-device Tycoon");
 
   await pageB.goto(`${appBaseUrl}#qa/room/${qaRoomCode}`, { waitUntil: "domcontentloaded" });
   await pageB.getByRole("heading", { name: "大家的答案" }).waitFor({ timeout: 30000 });

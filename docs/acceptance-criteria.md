@@ -146,6 +146,8 @@
 
 当前验证状态：
 
-- `scripts/verify-static.mjs` 需确认朋友账号 RPC、placeholder 规则、直接 PDF 下载和预览入口存在。
-- `scripts/verify-browser.mjs` 需确认本地账号记录页、100 Q&As PDF 导出版和直接下载事件可用。
-- 线上验收需在运行最新版 `supabase/schema.sql` 后重新执行，覆盖账号注册、登录、记录归属、跨设备恢复和 PDF 下载。
+- `scripts/verify-static.mjs` 已通过，确认朋友账号 RPC、placeholder 规则、直接 PDF 下载和预览入口存在。
+- `scripts/verify-browser.mjs` 已通过，确认本地账号记录页、100 Q&As PDF 导出版和直接下载事件可用。
+- `scripts/verify-online.mjs` 已通过，覆盖账号注册、登录、记录归属、跨设备恢复和 PDF 下载。
+- 账号跨设备验收测试账号 `acctmsoh4nzu`，账号记录房间：Q&A `D21A24`、Tycoon `34A346`。
+- 完整线上流程测试房间：Q&A PDF `6A3E22`、Tycoon `F1D08C`。

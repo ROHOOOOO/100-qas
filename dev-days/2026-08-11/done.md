@@ -14,3 +14,13 @@
 - 线上基础验收通过：`100 Q&As` 双玩家房间 `A665B3`、`Friends Tycoon` 房间 `210D1B`、PDF 下载均跑通。
 - 账号线上验收发现 Supabase `pgcrypto` 扩展函数需要显式使用 `extensions` schema，已修复 `supabase/schema.sql`。
 - 已再次发布 SQL 修复和账号验收脚本，提交 `feea84d`。
+- 用户重新运行修复版 SQL 后，最终线上验收通过。
+- 最终验收覆盖：
+  - 账号名 + 密码注册。
+  - 第二个浏览器登录同一账号后看到 Q&A 与 Tycoon 记录。
+  - 跨设备进入 Q&A 房间并恢复结果页。
+  - 跨设备进入 Tycoon 房间并恢复玩家身份。
+  - Q&A 双玩家提交、PDF 下载。
+  - Tycoon 双玩家创建、加入、聊天、开始、掷骰、退出破产、结果恢复。
+- 最终验收测试账号 `acctmsoh4nzu`，账号记录房间：Q&A `D21A24`、Tycoon `34A346`。
+- 最终完整流程测试房间：Q&A PDF `6A3E22`、Tycoon `F1D08C`。
