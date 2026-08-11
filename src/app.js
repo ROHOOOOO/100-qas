@@ -25,6 +25,7 @@
   var tycoonActionTimer = null;
   var tycoonAutoSkipInFlight = false;
   var tycoonMobileTab = "logs";
+  var tycoonOpenCellIndex = null;
   var accountRecordsCache = null;
   var qaPdfObjectUrl = "";
   var createRoomDraft = {
@@ -1211,6 +1212,7 @@
     var pageName = parts[0] || "home";
 
     if (!(pageName === "tycoon" && parts[1] === "room")) {
+      tycoonOpenCellIndex = null;
       setTycoonPolling("");
     }
 
@@ -1736,6 +1738,13 @@
     return "grid-row:" + row + ";grid-column:" + col + ";";
   }
 
+  function tycoonCellSide(index) {
+    if (index <= 8) return "top";
+    if (index <= 16) return "right";
+    if (index <= 24) return "bottom";
+    return "left";
+  }
+
   function renderTycoonBoard(room, currentPlayer) {
     return [
       '<section class="tycoon-board-panel panel" aria-label="Friends Tycoon 地图">',
@@ -1750,11 +1759,22 @@
         var isTurnCell = currentTurnPlayer && currentTurnPlayer.position === index && currentTurnPlayer.status !== "bankrupt";
         var isActionCell = room.turnPhase === "action" && Number(room.actionCellIndex) === index;
         var style = tycoonRingStyle(index) + (owner ? tycoonPlayerStyle(room, owner.id) : "");
+        var isDetailOpen = tycoonOpenCellIndex === index;
+        var detailId = "tycoon-cell-detail-" + index;
+        var cellClasses = [
+          "tycoon-cell",
+          "tycoon-cell-" + cell.type,
+          "tycoon-cell-side-" + tycoonCellSide(index),
+          owner ? "is-owned" : "",
+          isTurnCell ? "is-turn-cell" : "",
+          isActionCell ? "is-action-cell" : "",
+          isDetailOpen ? "is-detail-open" : ""
+        ].filter(Boolean).join(" ");
         return [
-          '<div class="tycoon-cell tycoon-cell-' + escapeHtml(cell.type) + (owner ? " is-owned" : "") + (isTurnCell ? " is-turn-cell" : "") + (isActionCell ? " is-action-cell" : "") + '" style="' + escapeHtml(style) + '">',
+          '<div class="' + escapeHtml(cellClasses) + '" style="' + escapeHtml(style) + '" data-action="tycoon-cell-detail" data-cell-index="' + index + '" role="button" tabindex="0" aria-expanded="' + (isDetailOpen ? "true" : "false") + '" aria-describedby="' + detailId + '" title="查看地块详情">',
           '  <span>' + (index + 1) + '</span>',
           '  <strong>' + escapeHtml(cell.name) + '</strong>',
-          property ? '  <small>' + (owner ? escapeHtml(owner.nickname) + ' · Lv.' + property.level : '无主 · ' + formatMoney(cell.price)) + '</small>' : renderTycoonCellMeta(cell),
+          '  <small>' + escapeHtml(renderTycoonCellSummary(cell, property, owner)) + '</small>',
           playersHere.length ? [
           '  <div class="tycoon-tokens">',
           playersHere.map(function (player) {
@@ -1762,6 +1782,7 @@
           }).join(""),
           '  </div>'
           ].join("") : "",
+          renderTycoonCellDetail(room, index, cell, property, owner, detailId, isDetailOpen),
           '</div>'
         ].join("");
       }).join(""),
@@ -1775,6 +1796,16 @@
     ].join("");
   }
 
+  function renderTycoonCellSummary(cell, property, owner) {
+    if (property) return owner ? owner.nickname + " · Lv." + property.level : "无主地";
+    if (cell.type === "bonus") return "+" + formatMoney(cell.bonus);
+    if (cell.type === "tax") return "-" + formatMoney(cell.fee);
+    if (cell.type === "start") return "经过 +" + formatMoney(TYCOON_PASS_START_REWARD);
+    if (cell.type === "chance") return "随机事件";
+    if (cell.type === "airport") return "交通枢纽";
+    return "休息";
+  }
+
   function renderTycoonCellMeta(cell) {
     if (cell.type === "bonus") return '  <small>+' + formatMoney(cell.bonus) + '</small>';
     if (cell.type === "tax") return '  <small>-' + formatMoney(cell.fee) + '</small>';
@@ -1782,6 +1813,56 @@
     if (cell.type === "chance") return '  <small>随机事件</small>';
     if (cell.type === "airport") return '  <small>交通枢纽</small>';
     return '  <small>休息</small>';
+  }
+
+  function renderTycoonCellDetail(room, index, cell, property, owner, detailId, isDetailOpen) {
+    var rows = [];
+    var rentRows = "";
+
+    if (property) {
+      rows.push(["状态", owner ? owner.nickname + " · Lv." + property.level : "无主地"]);
+      rows.push(["买地", formatMoney(cell.price)]);
+      rows.push(["升级", property.level >= TYCOON_MAX_LEVEL ? "已满级" : formatMoney(cell.upgradeCost) + " / 次"]);
+      rows.push(["当前过路费", owner ? formatMoney(tycoonRent(cell, property.level)) : "未拥有时无过路费"]);
+      rentRows = [
+        '<div class="tycoon-rent-grid">',
+        [1, 2, 3, 4].map(function (level) {
+          return '<span>Lv.' + level + ' ' + formatMoney(tycoonRent(cell, level)) + '</span>';
+        }).join(""),
+        '</div>'
+      ].join("");
+    } else if (cell.type === "start") {
+      rows.push(["类型", "起点"]);
+      rows.push(["经过奖励", formatMoney(TYCOON_PASS_START_REWARD)]);
+      rows.push(["说明", "经过或到达都会获得奖励"]);
+    } else if (cell.type === "chance") {
+      rows.push(["类型", "机会"]);
+      rows.push(["说明", "随机获得奖励或支付费用"]);
+    } else if (cell.type === "tax") {
+      rows.push(["类型", "缴费"]);
+      rows.push(["费用", formatMoney(cell.fee)]);
+    } else if (cell.type === "bonus") {
+      rows.push(["类型", "奖励"]);
+      rows.push(["奖金", formatMoney(cell.bonus)]);
+    } else if (cell.type === "airport") {
+      rows.push(["类型", "交通枢纽"]);
+      rows.push(["说明", "到达后立刻向前移动 3 格"]);
+    } else {
+      rows.push(["类型", "休息"]);
+      rows.push(["说明", "停在这里不会扣钱"]);
+    }
+
+    return [
+      '  <div class="tycoon-cell-popover" id="' + escapeHtml(detailId) + '" aria-hidden="' + (isDetailOpen ? "false" : "true") + '">',
+      '    <b>' + escapeHtml(cell.name) + '</b>',
+      '    <dl>',
+      rows.map(function (row) {
+        return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(row[1]) + '</dd></div>';
+      }).join(""),
+      '    </dl>',
+      rentRows,
+      '  </div>'
+    ].join("");
   }
 
   function renderTycoonActionPanel(room, player) {
@@ -3696,6 +3777,13 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function toggleTycoonCellDetail(cellIndex) {
+    var nextIndex = Number(cellIndex);
+    if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= tycoonMap.length) return;
+    tycoonOpenCellIndex = tycoonOpenCellIndex === nextIndex ? null : nextIndex;
+    render({ skipOnlineSync: true });
+  }
+
   document.addEventListener("click", function (event) {
     var target = event.target.closest("[data-action]");
     if (!target || target.tagName === "FORM") return;
@@ -3731,6 +3819,7 @@
       tycoonMobileTab = target.getAttribute("data-tab") === "chat" ? "chat" : "logs";
       render({ skipOnlineSync: true });
     }
+    if (action === "tycoon-cell-detail") toggleTycoonCellDetail(target.getAttribute("data-cell-index"));
     if (action === "tycoon-remove-player") {
       showTycoonConfirm(
         "确认移除玩家吗?",
@@ -3775,7 +3864,18 @@
   });
 
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") closeSubmitConfirm();
+    var detailTarget = event.target.closest && event.target.closest('[data-action="tycoon-cell-detail"]');
+    if (detailTarget && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      toggleTycoonCellDetail(detailTarget.getAttribute("data-cell-index"));
+    }
+    if (event.key === "Escape") {
+      closeSubmitConfirm();
+      if (tycoonOpenCellIndex !== null) {
+        tycoonOpenCellIndex = null;
+        render({ skipOnlineSync: true });
+      }
+    }
   });
 
   document.addEventListener("submit", function (event) {

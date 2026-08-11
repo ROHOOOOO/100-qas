@@ -32,6 +32,7 @@ const appUrl = pathToFileURL(join(process.cwd(), "index.html")).href + "?backend
 const customQuestions = Array.from({ length: 3 }, (_, index) => `自定义问题 ${index + 1}?`);
 const lobbyScreenshot = join(tmpdir(), "friends-games-local-lobby.png");
 const tycoonScreenshot = join(tmpdir(), "friends-games-local-tycoon.png");
+const tycoonDetailScreenshot = join(tmpdir(), "friends-games-local-tycoon-detail.png");
 const tycoonRoomScreenshot = join(tmpdir(), "friends-games-local-tycoon-room.png");
 const resultsScreenshot = join(tmpdir(), "friends-games-local-results.png");
 const mobileLobbyScreenshot = join(tmpdir(), "friends-games-local-mobile-lobby.png");
@@ -96,6 +97,12 @@ try {
   await page.locator('[data-action="switch-tycoon-player"]').first().click();
   await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByText("游戏中 · 第 1 回合").first().waitFor();
+  await page.locator('[data-action="tycoon-cell-detail"][data-cell-index="1"]').click();
+  await page.locator("#tycoon-cell-detail-1").getByText("买地").waitFor();
+  await page.locator("#tycoon-cell-detail-1").getByText("升级").waitFor();
+  await page.locator("#tycoon-cell-detail-1").getByText("Lv.4").waitFor();
+  await page.screenshot({ path: tycoonDetailScreenshot, fullPage: false });
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "游戏规则" }).click();
   await page.getByRole("heading", { name: "游戏规则" }).waitFor();
   await page.getByRole("button", { name: "知道了" }).click();
@@ -294,6 +301,7 @@ try {
     screenshots: {
       lobby: lobbyScreenshot,
       tycoon: tycoonScreenshot,
+      tycoonDetail: tycoonDetailScreenshot,
       tycoonRoom: tycoonRoomScreenshot,
       results: resultsScreenshot,
       mobileLobby: mobileLobbyScreenshot,

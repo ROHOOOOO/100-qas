@@ -50,6 +50,8 @@ assert(appJs.includes('data-action="tycoon-roll"'), "Tycoon must expose a roll a
 assert(appJs.includes('data-action="tycoon-exit"'), "Tycoon must expose a player exit action.");
 assert(appJs.includes('data-action="tycoon-skip-action"'), "Tycoon must expose a skip action after roll decisions.");
 assert(appJs.includes('data-action="tycoon-remove-player"'), "Tycoon host must be able to remove players.");
+assert(appJs.includes('data-action="tycoon-cell-detail"'), "Tycoon map cells must expose tap/click detail panels.");
+assert(appJs.includes("renderTycoonCellDetail"), "Tycoon must render buy, upgrade, and rent details on demand.");
 assert(appJs.includes("isTextEntryActive"), "Tycoon polling must avoid interrupting active text input.");
 assert(appJs.includes("tycoon_auto_skip_action"), "Tycoon must auto-skip expired buy/upgrade decisions online.");
 assert(appJs.includes("bankruptTycoonPlayer"), "Tycoon must convert exits and negative cash into bankruptcy.");
@@ -100,6 +102,8 @@ assert(stylesCss.includes(".game-card"), "Game lobby card styles must exist.");
 assert(stylesCss.includes(".tycoon-rules"), "Friends Tycoon rules styles must exist.");
 assert(stylesCss.includes(".tycoon-board"), "Friends Tycoon board styles must exist.");
 assert(stylesCss.includes(".tycoon-board-center"), "Friends Tycoon board must support a ring-map center panel.");
+assert(stylesCss.includes(".tycoon-cell-popover"), "Friends Tycoon map cells must support hover/tap detail popovers.");
+assert(stylesCss.includes("min-width: 1500px"), "Friends Tycoon must enlarge the board on wide desktop screens.");
 assert(stylesCss.includes(".tycoon-feed-tabs"), "Friends Tycoon mobile layout must use feed tabs.");
 assert(stylesCss.includes(".tycoon-chat-panel"), "Friends Tycoon chat panel styles must exist.");
 assert(stylesCss.includes(".account-layout"), "Account page styles must exist.");

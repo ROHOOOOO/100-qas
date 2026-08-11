@@ -601,9 +601,9 @@ textarea:focus {
 
 .tycoon-game-layout {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 0.9fr);
-  gap: 14px;
-  width: min(1440px, calc(100% - 24px));
+  grid-template-columns: minmax(720px, 2.35fr) minmax(340px, 0.85fr);
+  gap: 18px;
+  width: min(1760px, calc(100% - 32px));
   min-height: calc(100vh - 76px);
   margin: 0 auto;
   padding: 12px 0 18px;
@@ -665,25 +665,31 @@ textarea:focus {
   display: grid;
   width: 100%;
   min-height: 0;
-  padding: 12px;
+  padding: 14px;
+  overflow: visible;
 }
 
 .tycoon-board {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
   grid-template-rows: repeat(9, minmax(0, 1fr));
-  gap: 6px;
+  gap: 7px;
   width: min(100%, calc(100vh - 170px));
-  max-width: 860px;
+  max-width: 960px;
   aspect-ratio: 1;
   margin: auto;
+  overflow: visible;
 }
 
 .tycoon-game-layout.is-playing .tycoon-board {
   width: min(100%, calc(100vh - 210px));
+  max-width: 960px;
 }
 
 .tycoon-board-center {
+  position: relative;
+  z-index: 1;
   grid-column: 2 / 9;
   grid-row: 2 / 9;
   display: grid;
@@ -699,15 +705,24 @@ textarea:focus {
 
 .tycoon-cell {
   position: relative;
+  z-index: 2;
   display: grid;
   align-content: start;
-  gap: 3px;
+  gap: 4px;
   min-height: 0;
-  padding: 7px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-soft);
-  overflow: hidden;
+  overflow: visible;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tycoon-cell:hover,
+.tycoon-cell:focus-visible,
+.tycoon-cell.is-detail-open {
+  z-index: 20;
 }
 
 .tycoon-cell.is-owned {
@@ -726,20 +741,115 @@ textarea:focus {
 
 .tycoon-cell span {
   color: var(--coral-dark);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 900;
 }
 
 .tycoon-cell strong {
   color: #25332f;
-  font-size: clamp(0.62rem, 0.9vw, 0.82rem);
+  font-size: 0.84rem;
   line-height: 1.18;
 }
 
 .tycoon-cell small {
   color: var(--muted);
-  font-size: clamp(0.58rem, 0.78vw, 0.7rem);
+  font-size: 0.72rem;
   line-height: 1.2;
+}
+
+.tycoon-cell-popover {
+  position: absolute;
+  z-index: 40;
+  display: none;
+  width: min(245px, 72vw);
+  padding: 10px;
+  border: 1px solid rgba(32, 46, 41, 0.16);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 34px rgba(32, 46, 41, 0.16);
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.tycoon-cell:hover .tycoon-cell-popover,
+.tycoon-cell:focus-visible .tycoon-cell-popover,
+.tycoon-cell.is-detail-open .tycoon-cell-popover {
+  display: grid;
+  gap: 8px;
+}
+
+.tycoon-cell-side-top .tycoon-cell-popover {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tycoon-cell-side-right .tycoon-cell-popover {
+  top: 50%;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
+.tycoon-cell-side-bottom .tycoon-cell-popover {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tycoon-cell-side-left .tycoon-cell-popover {
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
+.tycoon-cell-popover b {
+  color: var(--ink);
+  font-size: 0.94rem;
+  line-height: 1.2;
+}
+
+.tycoon-cell-popover dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.tycoon-cell-popover dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.tycoon-cell-popover dt,
+.tycoon-cell-popover dd {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.tycoon-cell-popover dt {
+  color: var(--muted);
+}
+
+.tycoon-cell-popover dd {
+  color: #25332f;
+  font-weight: 780;
+}
+
+.tycoon-rent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tycoon-rent-grid span {
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: #33443f;
+  font-size: 0.74rem;
+  font-weight: 760;
 }
 
 .tycoon-cell-start,
@@ -1428,6 +1538,38 @@ textarea:focus {
   font-size: 0.88rem;
 }
 
+@media (min-width: 1500px) and (min-height: 860px) {
+  .tycoon-board {
+    gap: 8px;
+    max-width: 1040px;
+  }
+
+  .tycoon-game-layout.is-playing .tycoon-board {
+    max-width: 1040px;
+  }
+
+  .tycoon-board-center {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .tycoon-cell {
+    padding: 9px;
+  }
+
+  .tycoon-cell span {
+    font-size: 0.76rem;
+  }
+
+  .tycoon-cell strong {
+    font-size: 0.92rem;
+  }
+
+  .tycoon-cell small {
+    font-size: 0.76rem;
+  }
+}
+
 .pdf-export-layout {
   display: grid;
   gap: 20px;
@@ -1647,6 +1789,7 @@ textarea:focus {
 
   .tycoon-game-layout.is-playing .tycoon-board {
     width: 100%;
+    max-width: 560px;
   }
 
   .tycoon-board-center {
@@ -1660,6 +1803,7 @@ textarea:focus {
   .tycoon-cell {
     min-height: 0;
     padding: 4px;
+    overflow: visible;
   }
 
   .tycoon-cell span {
@@ -1672,6 +1816,36 @@ textarea:focus {
 
   .tycoon-cell small {
     display: none;
+  }
+
+  .tycoon-cell-popover,
+  .tycoon-cell-side-top .tycoon-cell-popover,
+  .tycoon-cell-side-right .tycoon-cell-popover,
+  .tycoon-cell-side-bottom .tycoon-cell-popover,
+  .tycoon-cell-side-left .tycoon-cell-popover {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 14px;
+    left: 12px;
+    width: auto;
+    max-height: 48vh;
+    overflow: auto;
+    transform: none;
+    pointer-events: none;
+  }
+
+  .tycoon-cell:hover .tycoon-cell-popover,
+  .tycoon-cell:focus-visible .tycoon-cell-popover {
+    display: none;
+  }
+
+  .tycoon-cell.is-detail-open .tycoon-cell-popover {
+    display: grid;
+  }
+
+  .tycoon-cell-popover dl div {
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 
   .tycoon-tokens b {
