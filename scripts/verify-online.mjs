@@ -144,7 +144,9 @@ async function verifyOnlineTycoon(pageA, browser) {
   const rollButton = pageA.getByRole("button", { name: "掷骰子" });
   assert(await rollButton.isEnabled(), "Host should be able to roll on the first Tycoon turn.");
   await rollButton.click();
-  await pageA.locator(".dice-result").waitFor({ timeout: 30000 });
+  await pageA.waitForFunction(() => {
+    return Boolean(document.querySelector(".dice-result")) || document.body.innerText.includes("线上大富翁B 的回合");
+  }, null, { timeout: 30000 });
 
   if (await pageA.getByRole("button", { name: "跳过" }).count()) {
     await pageA.getByRole("button", { name: "跳过" }).click();

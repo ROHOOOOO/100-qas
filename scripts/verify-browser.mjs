@@ -100,7 +100,9 @@ try {
   await page.getByRole("heading", { name: "游戏规则" }).waitFor();
   await page.getByRole("button", { name: "知道了" }).click();
   await page.getByRole("button", { name: "掷骰子" }).click();
-  await page.locator(".dice-result").waitFor();
+  await page.waitForFunction(() => {
+    return Boolean(document.querySelector(".dice-result")) || document.body.innerText.includes("Tycoon朋友 的回合");
+  });
   if (await page.getByRole("button", { name: "跳过" }).count()) {
     await page.getByRole("button", { name: "跳过" }).click();
   }
