@@ -55,6 +55,10 @@ assert(appJs.includes('data-action="tycoon-set-color"'), "Tycoon players must be
 assert(appJs.includes("renderTycoonCellDetail"), "Tycoon must render buy, upgrade, and rent details on demand.");
 assert(appJs.includes("renderTycoonColorPicker"), "Tycoon setup must render preset player color choices.");
 assert(appJs.includes("isTextEntryActive"), "Tycoon polling must avoid interrupting active text input.");
+assert(appJs.includes("getTycoonRoomSignature"), "Tycoon polling must compare room signatures before re-rendering the board.");
+assert(appJs.includes("updateTycoonSecondaryPanels"), "Tycoon polling must update secondary panels without re-rendering the mobile board.");
+assert(appJs.includes("tycoon-mobile-sheet"), "Tycoon mobile room must render a bottom sheet for current turn, logs, chat, and cell details.");
+assert(appJs.includes('data-action="tycoon-toggle-sheet"'), "Tycoon mobile bottom sheet must be expandable and collapsible.");
 assert(appJs.includes("tycoon_auto_skip_action"), "Tycoon must auto-skip expired buy/upgrade decisions online.");
 assert(appJs.includes("bankruptTycoonPlayer"), "Tycoon must convert exits and negative cash into bankruptcy.");
 assert(appJs.includes("TYCOON_MAX_LEVEL = 4"), "Tycoon must keep the level cap at 4.");
@@ -109,6 +113,9 @@ assert(stylesCss.includes("aspect-ratio: 16 / 9"), "Friends Tycoon desktop board
 assert(stylesCss.includes(".tycoon-color-picker"), "Friends Tycoon must style preset color selection controls.");
 assert(stylesCss.includes("min-width: 1500px"), "Friends Tycoon must enlarge the board on wide desktop screens.");
 assert(stylesCss.includes(".tycoon-feed-tabs"), "Friends Tycoon mobile layout must use feed tabs.");
+assert(stylesCss.includes(".app-shell-tycoon-room .tycoon-board"), "Friends Tycoon mobile room must use a full-screen board layout.");
+assert(stylesCss.includes(".tycoon-mobile-sheet"), "Friends Tycoon mobile room must style a bottom sheet.");
+assert(stylesCss.includes("border-style: dashed"), "Friends Tycoon event cells must be visually distinct from player-owned cells.");
 assert(stylesCss.includes(".tycoon-chat-panel"), "Friends Tycoon chat panel styles must exist.");
 assert(stylesCss.includes(".account-layout"), "Account page styles must exist.");
 assert(stylesCss.includes(".pdf-document"), "PDF export document styles must exist.");

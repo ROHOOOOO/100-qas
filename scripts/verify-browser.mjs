@@ -90,9 +90,9 @@ try {
   await page.getByRole("button", { name: "本地加朋友" }).click();
   await page.locator(".inline-join-form input[name=\"nickname\"]").fill("Tycoon朋友");
   await page.locator(".inline-join-form button").click();
-  await page.locator(".tycoon-player-list").getByText("Tycoon朋友").waitFor();
-  await page.locator(".tycoon-chat-form input[name=\"message\"]").fill("准备好了");
-  await page.locator(".tycoon-chat-form button").click();
+  await page.locator(".tycoon-desktop-center .tycoon-player-list").getByText("Tycoon朋友").waitFor();
+  await page.locator(".tycoon-side-panel .tycoon-chat-form input[name=\"message\"]").fill("准备好了");
+  await page.locator(".tycoon-side-panel .tycoon-chat-form button").click();
   await page.getByText("准备好了").waitFor();
   await page.locator('[data-action="switch-tycoon-player"]').first().click();
   await page.getByRole("button", { name: "开始游戏" }).click();
@@ -121,10 +121,10 @@ try {
   await page.getByText("已结束").first().waitFor();
   await page.reload();
   await page.getByText("已结束").first().waitFor();
-  await page.getByText("最终结果").waitFor();
+  await page.locator(".tycoon-board-center .tycoon-final-results").getByText("最终结果").waitFor();
   assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Bankrupt Tycoon player should not see the exit button again.");
   await page.locator('[data-action="switch-tycoon-player"]').first().click();
-  await page.getByText("胜利者：Tycoon房主").waitFor();
+  await page.locator(".tycoon-board-center .tycoon-final-results").getByText("胜利者：Tycoon房主").waitFor();
   assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Finished Tycoon winner should not see the exit button.");
   await page.screenshot({ path: tycoonRoomScreenshot, fullPage: false });
 
@@ -280,9 +280,28 @@ try {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${appUrl}#tycoon/room/${tycoonStateSummary.roomCode}`);
-  await page.getByText("最终结果").waitFor();
+  await page.locator(".app-shell-tycoon-room").waitFor();
+  await page.locator(".tycoon-mobile-sheet").waitFor();
+  await page.getByRole("button", { name: /的回合|已结束|等待开始/ }).first().waitFor();
+  await page.locator(".tycoon-mobile-tabs").waitFor({ state: "hidden" });
+  assert(await page.locator(".tycoon-mobile-sheet .tycoon-final-results").isHidden(), "Mobile bottom sheet body should stay hidden while collapsed.");
+  await page.locator(".tycoon-sheet-handle").click();
+  await page.locator(".tycoon-mobile-tabs").waitFor({ state: "visible" });
+  await page.locator(".tycoon-mobile-sheet").getByText("最终结果").waitFor();
+  await page.getByRole("button", { name: "当前" }).waitFor();
   await page.getByRole("button", { name: "动态" }).waitFor();
   await page.getByRole("button", { name: "聊天" }).waitFor();
+  await page.getByRole("button", { name: "地块" }).waitFor();
+  await page.locator('[data-action="tycoon-cell-detail"][data-cell-index="2"]').click();
+  await page.locator(".tycoon-mobile-detail-card").getByRole("heading", { name: "机会" }).waitFor();
+  const eventCellStyle = await page.locator(".tycoon-cell-chance").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      borderStyle: style.borderStyle,
+      background: style.backgroundColor
+    };
+  });
+  assert(eventCellStyle.borderStyle.includes("dashed"), "Mobile event cells should use a dashed border.");
   await page.screenshot({ path: mobileTycoonRoomScreenshot, fullPage: false });
 
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });

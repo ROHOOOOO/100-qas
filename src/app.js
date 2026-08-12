@@ -24,8 +24,11 @@
   var tycoonPollTimer = null;
   var tycoonActionTimer = null;
   var tycoonAutoSkipInFlight = false;
-  var tycoonMobileTab = "logs";
+  var tycoonMobileTab = "current";
+  var tycoonMobileSheetExpanded = false;
   var tycoonOpenCellIndex = null;
+  var tycoonLastInteractionAt = 0;
+  var tycoonLastRoomSignature = "";
   var accountRecordsCache = null;
   var qaPdfObjectUrl = "";
   var createRoomDraft = {
@@ -525,6 +528,10 @@
   }
 
   function renderShell(content, activeGame) {
+    app.className = "app-shell app-shell-" + (activeGame || "lobby");
+    if (activeGame === "tycoon" && getHashParts()[1] === "room") {
+      app.className += " app-shell-tycoon-room";
+    }
     app.innerHTML = [
       renderGlobalNav(activeGame),
       content
@@ -1148,6 +1155,61 @@
     return active.matches("input:not([type='button']):not([type='submit']), textarea, select, [contenteditable='true']");
   }
 
+  function markTycoonInteraction() {
+    tycoonLastInteractionAt = Date.now();
+  }
+
+  function getTycoonRoomSignature(room) {
+    if (!room) return "";
+    var players = getTycoonPlayers(room).map(function (player) {
+      return [
+        player.id,
+        player.nickname,
+        player.colorId,
+        player.cash,
+        player.position,
+        player.status
+      ].join(":");
+    }).join("|");
+    var properties = Object.keys(room.properties || {}).sort(function (a, b) {
+      return Number(a) - Number(b);
+    }).map(function (key) {
+      var property = room.properties[key];
+      return [property.cellIndex, property.ownerId || "", property.level || 0].join(":");
+    }).join("|");
+    var finalResults = room.finalResults ? JSON.stringify(room.finalResults) : "";
+    return [
+      room.id,
+      room.code,
+      room.status,
+      room.hostPlayerId,
+      room.currentTurn,
+      room.currentPlayerId || "",
+      room.turnPhase,
+      room.lastDice || "",
+      room.pendingAction || "",
+      room.actionCellIndex === null || room.actionCellIndex === undefined ? "" : room.actionCellIndex,
+      players,
+      properties,
+      finalResults
+    ].join("||");
+  }
+
+  function isTycoonInteractionBusy() {
+    return isTextEntryActive() || Date.now() - tycoonLastInteractionAt < 1200;
+  }
+
+  function updateTycoonSecondaryPanels(room) {
+    if (!room) return false;
+    var player = getTycoonCurrentPlayer(room);
+    var sidePanel = document.querySelector(".tycoon-side-panel");
+    var mobileSheet = document.querySelector(".tycoon-mobile-sheet");
+    if (!sidePanel && !mobileSheet) return false;
+    if (sidePanel) sidePanel.outerHTML = renderTycoonSidePanel(room, player);
+    if (mobileSheet) mobileSheet.outerHTML = renderTycoonMobileSheet(room, player);
+    return true;
+  }
+
   function setTycoonActionTicker(room) {
     window.clearInterval(tycoonActionTimer);
     tycoonActionTimer = null;
@@ -1200,11 +1262,18 @@
 
       try {
         var syncedRoom = await syncOnlineTycoonRoom(code);
-        if (isTextEntryActive()) {
+        var nextSignature = getTycoonRoomSignature(syncedRoom);
+        if (isTycoonInteractionBusy()) {
           setTycoonActionTicker(syncedRoom);
           setTycoonPolling(code);
           return;
         }
+        if (tycoonLastRoomSignature && nextSignature === tycoonLastRoomSignature && updateTycoonSecondaryPanels(syncedRoom)) {
+          setTycoonActionTicker(syncedRoom);
+          setTycoonPolling(code);
+          return;
+        }
+        tycoonLastRoomSignature = nextSignature;
         render({ skipOnlineSync: true });
       } catch (error) {
         showToast("Friends Tycoon 暂时没有同步成功，稍后会自动重试。");
@@ -1713,6 +1782,7 @@
     }
 
     room = normalizeTycoonRoom(room);
+    tycoonLastRoomSignature = getTycoonRoomSignature(room);
     document.title = "Room " + room.code + " | Friends Tycoon";
     var player = getTycoonCurrentPlayer(room);
 
@@ -1725,6 +1795,7 @@
       renderTycoonBoard(room, player),
       '  </section>',
       renderTycoonSidePanel(room, player),
+      renderTycoonMobileSheet(room, player),
       '</main>'
     ].join(""), "tycoon");
     setTycoonActionTicker(room);
@@ -1862,10 +1933,32 @@
         ].join("");
       }).join(""),
       '    <section class="tycoon-board-center">',
+      '      <div class="tycoon-desktop-center">',
       renderTycoonActionPanel(room, currentPlayer),
       renderTycoonPlayersPanel(room, currentPlayer),
+      '      </div>',
       room.finalResults ? renderTycoonFinalResults(room.finalResults) : "",
       '    </section>',
+      '  </div>',
+      '</section>'
+    ].join("");
+  }
+
+  function renderTycoonMobileCellDetail(room) {
+    if (tycoonOpenCellIndex === null) {
+      return '<section class="tycoon-mobile-detail-empty"><p class="muted">点一下地图上的地点，就能在这里查看价格、升级和过路费。</p></section>';
+    }
+
+    var index = Number(tycoonOpenCellIndex);
+    var cell = getTycoonCell(index);
+    var property = getTycoonProperty(room, index);
+    var owner = property && property.ownerId ? room.players[property.ownerId] : null;
+    return [
+      '<section class="tycoon-mobile-detail-card">',
+      '  <p class="eyebrow">地点 ' + (index + 1) + '</p>',
+      '  <h2>' + escapeHtml(cell.name) + '</h2>',
+      '  <div class="tycoon-mobile-detail-body">',
+      renderTycoonCellDetailContent(room, index, cell, property, owner),
       '  </div>',
       '</section>'
     ].join("");
@@ -1891,6 +1984,14 @@
   }
 
   function renderTycoonCellDetail(room, index, cell, property, owner, detailId, isDetailOpen) {
+    return [
+      '  <div class="tycoon-cell-popover" id="' + escapeHtml(detailId) + '" aria-hidden="' + (isDetailOpen ? "false" : "true") + '">',
+      renderTycoonCellDetailContent(room, index, cell, property, owner),
+      '  </div>'
+    ].join("");
+  }
+
+  function renderTycoonCellDetailContent(room, index, cell, property, owner) {
     var rows = [];
     var rentRows = "";
 
@@ -1928,15 +2029,13 @@
     }
 
     return [
-      '  <div class="tycoon-cell-popover" id="' + escapeHtml(detailId) + '" aria-hidden="' + (isDetailOpen ? "false" : "true") + '">',
       '    <b>' + escapeHtml(cell.name) + '</b>',
       '    <dl>',
       rows.map(function (row) {
         return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(row[1]) + '</dd></div>';
       }).join(""),
       '    </dl>',
-      rentRows,
-      '  </div>'
+      rentRows
     ].join("");
   }
 
@@ -2105,8 +2204,9 @@
   function renderTycoonSidePanel(room, player) {
     var currentTurnPlayer = room.currentPlayerId ? room.players[room.currentPlayerId] : null;
     var turnStyle = currentTurnPlayer ? tycoonPlayerStyle(room, currentTurnPlayer.id) : "";
+    var sideTab = tycoonMobileTab === "chat" ? "chat" : "logs";
     return [
-      '<aside class="tycoon-side-panel panel" data-mobile-tab="' + escapeHtml(tycoonMobileTab) + '">',
+      '<aside class="tycoon-side-panel panel" data-mobile-tab="' + escapeHtml(sideTab) + '">',
       '  <section class="tycoon-turn-card" style="' + escapeHtml(turnStyle) + '">',
       '    <span>当前回合</span>',
       '    <strong>' + escapeHtml(currentTurnPlayer ? currentTurnPlayer.nickname : tycoonStatusText(room.status)) + '</strong>',
@@ -2115,11 +2215,46 @@
       room.pendingAction ? '    <p>等待' + escapeHtml(tycoonPendingActionText(room.pendingAction)) + '，<span data-tycoon-countdown>' + getTycoonActionRemainingSeconds(room) + ' 秒</span>后默认跳过。</p>' : "",
       '  </section>',
       '  <div class="tycoon-feed-tabs" role="tablist" aria-label="手机端信息切换">',
-      '    <button class="' + (tycoonMobileTab === "logs" ? "is-active" : "") + '" data-action="tycoon-feed-tab" data-tab="logs" type="button">动态</button>',
-      '    <button class="' + (tycoonMobileTab === "chat" ? "is-active" : "") + '" data-action="tycoon-feed-tab" data-tab="chat" type="button">聊天</button>',
+      '    <button class="' + (sideTab === "logs" ? "is-active" : "") + '" data-action="tycoon-feed-tab" data-tab="logs" type="button">动态</button>',
+      '    <button class="' + (sideTab === "chat" ? "is-active" : "") + '" data-action="tycoon-feed-tab" data-tab="chat" type="button">聊天</button>',
       '  </div>',
       renderTycoonLogPanel(room),
       renderTycoonChatPanel(room, player),
+      '</aside>'
+    ].join("");
+  }
+
+  function renderTycoonMobileSheet(room, player) {
+    var currentTurnPlayer = room.currentPlayerId ? room.players[room.currentPlayerId] : null;
+    var turnStyle = currentTurnPlayer ? tycoonPlayerStyle(room, currentTurnPlayer.id) : "";
+    var tabs = [
+      ["current", "当前"],
+      ["logs", "动态"],
+      ["chat", "聊天"],
+      ["cell", "地块"]
+    ];
+    var activeTab = tycoonMobileTab === "chat" || tycoonMobileTab === "cell" || tycoonMobileTab === "logs" ? tycoonMobileTab : "current";
+    return [
+      '<aside class="tycoon-mobile-sheet' + (tycoonMobileSheetExpanded ? " is-expanded" : "") + '" data-mobile-tab="' + escapeHtml(activeTab) + '">',
+      '  <button class="tycoon-sheet-handle" data-action="tycoon-toggle-sheet" type="button" aria-expanded="' + (tycoonMobileSheetExpanded ? "true" : "false") + '">',
+      '    <span></span>',
+      '    <strong style="' + escapeHtml(turnStyle) + '">' + escapeHtml(currentTurnPlayer ? currentTurnPlayer.nickname + " 的回合" : tycoonStatusText(room.status)) + '</strong>',
+      '    <small>' + (room.pendingAction ? getTycoonActionRemainingSeconds(room) + ' 秒后默认跳过' : (currentTurnPlayer ? '第 ' + Number(room.currentTurn || 1) + ' 回合' : escapeHtml(tycoonVictoryText(room)))) + '</small>',
+      '  </button>',
+      '  <div class="tycoon-mobile-primary">',
+      renderTycoonActionPanel(room, player),
+      '  </div>',
+      '  <div class="tycoon-mobile-tabs" role="tablist" aria-label="手机端浮窗切换">',
+      tabs.map(function (tab) {
+        return '<button class="' + (activeTab === tab[0] ? "is-active" : "") + '" data-action="tycoon-feed-tab" data-tab="' + tab[0] + '" type="button">' + tab[1] + '</button>';
+      }).join(""),
+      '  </div>',
+      '  <div class="tycoon-mobile-sheet-body">',
+      activeTab === "current" ? renderTycoonPlayersPanel(room, player) + (room.finalResults ? renderTycoonFinalResults(room.finalResults) : "") : "",
+      activeTab === "logs" ? renderTycoonLogPanel(room) : "",
+      activeTab === "chat" ? renderTycoonChatPanel(room, player) : "",
+      activeTab === "cell" ? renderTycoonMobileCellDetail(room) : "",
+      '  </div>',
       '</aside>'
     ].join("");
   }
@@ -3904,6 +4039,10 @@
     var nextIndex = Number(cellIndex);
     if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= tycoonMap.length) return;
     tycoonOpenCellIndex = tycoonOpenCellIndex === nextIndex ? null : nextIndex;
+    if (tycoonOpenCellIndex !== null) {
+      tycoonMobileTab = "cell";
+      tycoonMobileSheetExpanded = true;
+    }
     render({ skipOnlineSync: true });
   }
 
@@ -3931,18 +4070,47 @@
     if (action === "new-local-player") clearCurrentPlayer();
     if (action === "switch-player") switchPlayer(target.getAttribute("data-player-id"));
     if (action === "copy-tycoon-link") copyTycoonLink();
-    if (action === "tycoon-start") startTycoonGame();
-    if (action === "tycoon-roll") rollTycoonDice();
-    if (action === "tycoon-buy") buyTycoonProperty();
-    if (action === "tycoon-upgrade") upgradeTycoonProperty();
-    if (action === "tycoon-skip-action") skipTycoonAction("manual");
-    if (action === "tycoon-end-turn") endTycoonTurn();
+    if (action === "tycoon-start") {
+      markTycoonInteraction();
+      startTycoonGame();
+    }
+    if (action === "tycoon-roll") {
+      markTycoonInteraction();
+      rollTycoonDice();
+    }
+    if (action === "tycoon-buy") {
+      markTycoonInteraction();
+      buyTycoonProperty();
+    }
+    if (action === "tycoon-upgrade") {
+      markTycoonInteraction();
+      upgradeTycoonProperty();
+    }
+    if (action === "tycoon-skip-action") {
+      markTycoonInteraction();
+      skipTycoonAction("manual");
+    }
+    if (action === "tycoon-end-turn") {
+      markTycoonInteraction();
+      endTycoonTurn();
+    }
     if (action === "open-tycoon-rules") showTycoonRules();
     if (action === "tycoon-feed-tab") {
-      tycoonMobileTab = target.getAttribute("data-tab") === "chat" ? "chat" : "logs";
+      var nextTab = target.getAttribute("data-tab");
+      tycoonMobileTab = nextTab === "chat" || nextTab === "cell" || nextTab === "current" ? nextTab : "logs";
+      tycoonMobileSheetExpanded = true;
+      markTycoonInteraction();
       render({ skipOnlineSync: true });
     }
-    if (action === "tycoon-cell-detail") toggleTycoonCellDetail(target.getAttribute("data-cell-index"));
+    if (action === "tycoon-toggle-sheet") {
+      tycoonMobileSheetExpanded = !tycoonMobileSheetExpanded;
+      markTycoonInteraction();
+      render({ skipOnlineSync: true });
+    }
+    if (action === "tycoon-cell-detail") {
+      markTycoonInteraction();
+      toggleTycoonCellDetail(target.getAttribute("data-cell-index"));
+    }
     if (action === "tycoon-set-color") setTycoonPlayerColor(target.getAttribute("data-player-id"), target.getAttribute("data-color-id"));
     if (action === "tycoon-remove-player") {
       showTycoonConfirm(
@@ -4061,6 +4229,7 @@
     }
 
     if (action === "tycoon-chat") {
+      markTycoonInteraction();
       sendTycoonMessage(String(new FormData(form).get("message") || ""));
     }
   });

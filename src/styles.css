@@ -45,6 +45,10 @@ button:disabled {
   min-height: 100vh;
 }
 
+.app-shell-tycoon-room {
+  background: var(--bg);
+}
+
 .site-nav {
   position: sticky;
   top: 0;
@@ -789,6 +793,10 @@ textarea:focus {
   overflow: auto;
 }
 
+.tycoon-desktop-center {
+  display: contents;
+}
+
 .tycoon-cell {
   position: relative;
   z-index: 2;
@@ -944,8 +952,29 @@ textarea:focus {
 .tycoon-cell-airport,
 .tycoon-cell-tax,
 .tycoon-cell-rest {
-  border-color: #cadde0;
-  background: #edf5f6;
+  border-color: #b8c0bf;
+  border-style: dashed;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(235, 238, 237, 0.9)),
+    #edf0ef;
+}
+
+.tycoon-cell-start span,
+.tycoon-cell-bonus span,
+.tycoon-cell-chance span,
+.tycoon-cell-airport span,
+.tycoon-cell-tax span,
+.tycoon-cell-rest span {
+  color: #5d6765;
+}
+
+.tycoon-cell-start strong,
+.tycoon-cell-bonus strong,
+.tycoon-cell-chance strong,
+.tycoon-cell-airport strong,
+.tycoon-cell-tax strong,
+.tycoon-cell-rest strong {
+  color: #2d3634;
 }
 
 .tycoon-tokens {
@@ -1151,6 +1180,10 @@ textarea:focus {
   height: calc(100vh - 96px);
   min-height: 0;
   padding: 12px;
+}
+
+.tycoon-mobile-sheet {
+  display: none;
 }
 
 .tycoon-turn-card {
@@ -1789,6 +1822,15 @@ textarea:focus {
 }
 
 @media (max-width: 780px) {
+  .app-shell-tycoon-room {
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell-tycoon-room .site-nav {
+    display: none;
+  }
+
   .site-nav {
     position: static;
     align-items: stretch;
@@ -1839,8 +1881,115 @@ textarea:focus {
     padding: 12px 0 36px;
   }
 
+  .app-shell-tycoon-room .tycoon-game-layout {
+    display: block;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .app-shell-tycoon-room .tycoon-board-zone {
+    display: block;
+    height: 100%;
+    min-height: 0;
+  }
+
   .tycoon-room-header {
     grid-template-columns: 1fr;
+  }
+
+  .app-shell-tycoon-room .tycoon-inline-join {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: 10px;
+    z-index: 24;
+    max-height: 34dvh;
+    overflow: auto;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(14px);
+  }
+
+  .app-shell-tycoon-room .tycoon-room-header {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    left: auto;
+    z-index: 24;
+    display: block;
+    width: auto;
+    max-width: min(56vw, 220px);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-header > div:first-child {
+    display: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    pointer-events: auto;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools button,
+  .app-shell-tycoon-room .tycoon-room-tools .small-status {
+    position: relative;
+    flex: 0 0 36px;
+    width: 36px;
+    min-width: 36px;
+    min-height: 34px;
+    overflow: hidden;
+    padding: 0;
+    border-color: rgba(223, 233, 229, 0.86);
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 8px 20px rgba(24, 35, 31, 0.1);
+    backdrop-filter: blur(12px);
+    color: transparent;
+    font-size: 0.76rem;
+    text-indent: -999px;
+    white-space: nowrap;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools button::before {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--ink);
+    font-size: 0.9rem;
+    font-weight: 900;
+    text-indent: 0;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools [data-action="copy-tycoon-link"]::before {
+    content: "↗";
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools [data-action="open-tycoon-rules"]::before {
+    content: "规";
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools [data-action="tycoon-exit"]::before {
+    content: "退";
+  }
+
+  .app-shell-tycoon-room .tycoon-room-tools .ghost-button,
+  .app-shell-tycoon-room .tycoon-room-tools .secondary-button:not([data-action="open-tycoon-rules"]):not([data-action="tycoon-exit"]),
+  .app-shell-tycoon-room .tycoon-room-tools .primary-button {
+    display: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-room-header .muted {
+    font-size: 0.82rem;
   }
 
   .tycoon-room-tools,
@@ -1872,10 +2021,47 @@ textarea:focus {
     gap: 3px;
   }
 
+  .app-shell-tycoon-room .tycoon-board-panel {
+    width: 100%;
+    height: 100dvh;
+    padding: 8px;
+    border: 0;
+    border-radius: 0;
+    background:
+      radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.92), rgba(238, 247, 244, 0.9) 54%, rgba(226, 236, 232, 0.96));
+    box-shadow: none;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    touch-action: pan-x pan-y;
+  }
+
+  .app-shell-tycoon-room .tycoon-board-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-board {
+    width: max(760px, 100%);
+    max-width: none;
+    height: max(560px, calc(100dvh - 128px));
+    margin: 4px auto 124px;
+    aspect-ratio: auto;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-template-rows: repeat(9, minmax(54px, 1fr));
+    gap: 4px;
+  }
+
   .tycoon-game-layout.is-playing .tycoon-board {
     width: 100%;
     max-width: 560px;
     aspect-ratio: 1;
+  }
+
+  .app-shell-tycoon-room .tycoon-game-layout.is-playing .tycoon-board {
+    width: max(760px, 100%);
+    max-width: none;
+    height: max(560px, calc(100dvh - 128px));
+    aspect-ratio: auto;
   }
 
   .tycoon-board-center {
@@ -1886,18 +2072,57 @@ textarea:focus {
     padding: 8px;
   }
 
+  .app-shell-tycoon-room .tycoon-board-center {
+    grid-column: 2 / 9;
+    grid-row: 2 / 9;
+    padding: 0;
+    border: 1px dashed rgba(103, 115, 111, 0.26);
+    background: rgba(255, 255, 255, 0.36);
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-desktop-center {
+    display: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-board-center .tycoon-final-results {
+    display: none;
+  }
+
   .tycoon-cell {
     min-height: 0;
     padding: 4px;
     overflow: visible;
   }
 
+  .app-shell-tycoon-room .tycoon-cell {
+    align-content: start;
+    gap: 3px;
+    min-height: 42px;
+    padding: 5px 4px;
+    border-radius: 7px;
+  }
+
+  .app-shell-tycoon-room .tycoon-cell.is-owned {
+    background: linear-gradient(180deg, var(--player-bg), rgba(255, 255, 255, 0.76));
+  }
+
   .tycoon-cell span {
     font-size: 0.56rem;
   }
 
+  .app-shell-tycoon-room .tycoon-cell span {
+    font-size: 0.58rem;
+  }
+
   .tycoon-cell strong {
     font-size: 0.58rem;
+  }
+
+  .app-shell-tycoon-room .tycoon-cell strong {
+    font-size: 0.66rem;
+    line-height: 1.12;
   }
 
   .tycoon-cell small {
@@ -1930,6 +2155,10 @@ textarea:focus {
     display: grid;
   }
 
+  .app-shell-tycoon-room .tycoon-cell.is-detail-open .tycoon-cell-popover {
+    display: none;
+  }
+
   .tycoon-cell-popover dl div {
     grid-template-columns: 64px minmax(0, 1fr);
   }
@@ -1945,6 +2174,186 @@ textarea:focus {
     grid-template-rows: auto auto auto;
     height: auto;
     max-height: none;
+  }
+
+  .app-shell-tycoon-room .tycoon-side-panel {
+    display: none;
+  }
+
+  .tycoon-mobile-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-rows: auto auto 0fr 0fr;
+    max-height: 82dvh;
+    padding: 8px 10px max(10px, env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(24, 35, 31, 0.12);
+    border-radius: 16px 16px 0 0;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 -18px 42px rgba(24, 35, 31, 0.18);
+    backdrop-filter: blur(18px);
+    transition: grid-template-rows 180ms ease, transform 180ms ease;
+  }
+
+  .tycoon-mobile-sheet.is-expanded {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+
+  .tycoon-sheet-handle {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 38px;
+    padding: 6px 4px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+  }
+
+  .tycoon-sheet-handle span {
+    justify-self: center;
+    width: 28px;
+    height: 4px;
+    border-radius: 999px;
+    background: #c9d1cf;
+  }
+
+  .tycoon-sheet-handle strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--player-ink, var(--ink));
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tycoon-sheet-handle small {
+    color: var(--muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .tycoon-mobile-primary {
+    min-width: 0;
+  }
+
+  .tycoon-mobile-primary .tycoon-action-panel {
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid rgba(223, 233, 229, 0.9);
+    background: rgba(247, 250, 248, 0.84);
+  }
+
+  .tycoon-mobile-primary .tycoon-action-panel h2,
+  .tycoon-mobile-primary .tycoon-action-panel .muted,
+  .tycoon-mobile-primary .tycoon-position-card {
+    display: none;
+  }
+
+  .tycoon-mobile-primary .dice-result {
+    min-width: 70px;
+    min-height: 38px;
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .tycoon-mobile-primary .tycoon-action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .tycoon-mobile-primary .tycoon-action-buttons button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .tycoon-mobile-primary .tycoon-countdown {
+    margin: 0;
+  }
+
+  .tycoon-mobile-primary .submit-hint {
+    margin: 0;
+    font-size: 0.82rem;
+  }
+
+  .tycoon-mobile-tabs,
+  .tycoon-mobile-sheet-body {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tycoon-mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+    padding-top: 8px;
+  }
+
+  .tycoon-mobile-tabs button {
+    min-height: 36px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-soft);
+    color: var(--muted);
+    font-weight: 850;
+  }
+
+  .tycoon-mobile-tabs button.is-active {
+    border-color: var(--mint);
+    background: #e5f3ee;
+    color: var(--ink);
+  }
+
+  .tycoon-mobile-sheet:not(.is-expanded) .tycoon-mobile-tabs,
+  .tycoon-mobile-sheet:not(.is-expanded) .tycoon-mobile-sheet-body {
+    display: none;
+  }
+
+  .tycoon-mobile-sheet-body {
+    overflow: auto;
+    padding-top: 10px;
+  }
+
+  .tycoon-mobile-sheet-body .tycoon-feed-section {
+    display: grid;
+  }
+
+  .tycoon-mobile-sheet-body .tycoon-log-list,
+  .tycoon-mobile-sheet-body .tycoon-chat-list {
+    max-height: 42dvh;
+  }
+
+  .tycoon-mobile-sheet-body .tycoon-players-panel {
+    max-height: 42dvh;
+  }
+
+  .tycoon-mobile-detail-card,
+  .tycoon-mobile-detail-empty {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-soft);
+  }
+
+  .tycoon-mobile-detail-card h2 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+
+  .tycoon-mobile-detail-body {
+    display: grid;
+    gap: 8px;
+  }
+
+  .tycoon-mobile-detail-body .tycoon-rent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .tycoon-feed-tabs {
