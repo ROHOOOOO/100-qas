@@ -13,3 +13,9 @@
 - 已修复 `supabase/schema.sql`：`tycoon_update_player_color` 改为直接按房间、玩家 key 或账号 token 校验玩家身份。
 - 已更新 `scripts/verify-static.mjs`，防止 SQL 再次调用缺失的 `tycoon_require_player`。
 - 已运行 `node --check src/app.js` 与 `node scripts/verify-static.mjs`，结果通过。
+- 用户重新运行修复后的最新版 `supabase/schema.sql`，返回运行成功。
+- 已完成线上 Supabase RPC 复验，测试房间 `960BF7`：
+  - 房主创建房间时选择颜色 `4`，返回 `hostColor: 4`。
+  - 第二个玩家加入时也请求颜色 `4`，系统自动避让为 `guestInitialColor: 0`。
+  - 第二个玩家开局前修改颜色为 `5`，返回 `guestUpdatedColor: 5`。
+- Friends Tycoon 玩家颜色的创建、加入避让和开局前修改已确认在线可用。
