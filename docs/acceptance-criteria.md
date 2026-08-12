@@ -87,6 +87,7 @@
 - 新的图形化本地/线上浏览器验收因内置浏览器安全策略拦截本地页、线上导航超时重置而未完成，后续需补桌面与手机截图确认。
 - 最新地图比例与颜色收敛方案已通过 `node --check src/app.js` 与 `node scripts/verify-static.mjs`。
 - 线上玩家颜色同步需要先在 Supabase SQL Editor 运行最新版 `supabase/schema.sql`，同步 `tycoon_players.color_id` 与 `tycoon_update_player_color`。
+- 2026-08-12 线上 RPC 验证发现 `tycoon_update_player_color` 旧 SQL 调用了缺失辅助函数；已修复 `supabase/schema.sql` 并等待用户重新运行后复验。
 
 ## 阶段 1 验收
 

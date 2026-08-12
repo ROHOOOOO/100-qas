@@ -1577,6 +1577,7 @@ as $$
 declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   select *
     into v_room
@@ -1592,7 +1593,20 @@ begin
     raise exception 'Color can only be changed before the game starts.';
   end if;
 
-  v_player := public.tycoon_require_player(v_room.id, p_player_id, p_player_key, p_account_token);
+  select *
+    into v_player
+    from public.tycoon_players
+   where id = p_player_id
+     and room_id = v_room.id
+     and (
+       (p_player_key is not null and player_key = p_player_key)
+       or (v_account_id is not null and account_id = v_account_id)
+     )
+   for update;
+
+  if not found or v_player.status = 'bankrupt' then
+    raise exception 'Player not found.';
+  end if;
 
   update public.tycoon_players
      set color_id = public.tycoon_pick_color_id(v_room.id, p_color_id, v_player.id),

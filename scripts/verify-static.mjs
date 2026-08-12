@@ -142,6 +142,7 @@ assert(supabaseSql.includes("pending_action"), "Supabase SQL must track pending 
 assert(supabaseSql.includes("color_id"), "Supabase SQL must store Tycoon player color choices.");
 assert(supabaseSql.includes("tycoon_pick_color_id"), "Supabase SQL must prevent duplicate Tycoon colors where possible.");
 assert(supabaseSql.includes("tycoon_update_player_color"), "Supabase SQL must let players update colors before the game starts.");
+assert(!supabaseSql.includes("tycoon_require_player("), "Tycoon color update SQL must not call a missing helper function.");
 assert(supabaseSql.includes("tycoon_skip_action"), "Supabase SQL must define tycoon_skip_action.");
 assert(supabaseSql.includes("tycoon_auto_skip_action"), "Supabase SQL must define tycoon_auto_skip_action.");
 assert(supabaseSql.includes("tycoon_remove_player"), "Supabase SQL must define tycoon_remove_player.");

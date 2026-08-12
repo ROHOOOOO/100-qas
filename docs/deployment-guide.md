@@ -38,6 +38,7 @@
 - Friends Tycoon 地图卡片和地点详情 UI 已发布到 GitHub Pages，最新提交 `2ab74a25de146588467f6f09bf1019f43f42a88c`。
 - Friends Tycoon 已继续调整为桌面横向长方形棋盘、手机紧凑地图、统一事件格颜色和 6 个玩家预设色，并已发布到 GitHub Pages，提交 `da6b39cbcdc663c2975c532779a8a33228bea26e`。
 - 线上玩家颜色同步需要运行最新版 `supabase/schema.sql`，其中包含 `tycoon_players.color_id` 与 `tycoon_update_player_color`。
+- 2026-08-12 已修复 `tycoon_update_player_color` 的玩家身份校验 SQL；如果运行旧版后开局前改颜色失败，需要重新运行最新版 `supabase/schema.sql`。
 - Friends Tycoon 最新线上双玩家验收已通过，测试房间 `70B573` 跑通创建、加入、聊天、开始、掷骰、跳过/自动换人、退出即破产、重新进入恢复和最终结果。
 - Friends Tycoon 房主移除玩家线上专项验收已通过，测试房间 `A33652`。
 - Friends Tycoon 8 秒倒计时超时默认跳过线上专项验收已通过，测试房间 `28CF70`。
