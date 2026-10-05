@@ -98,7 +98,7 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 - 玩家退出前出现页面内确认；确认退出后状态变为破产。
 - 刷新后 Friends Tycoon 房间状态、最终赢家和游戏记录仍可恢复。
 - Friends Tycoon 游戏结束后清空聊天。
-- 输入昵称。
+- 注册账号并自动使用用户名参与游戏。
 - 填写当前自定义题库的全部题目。
 - 取消一次提交确认后不会提交。
 - 再次确认提交后进入结果页。
@@ -140,3 +140,14 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 
 - `docs/design-guidelines.md`
 - 当天 `dev-days/YYYY-MM-DD/done.md`
+
+## 棋类回归
+
+运行 `node scripts/verify-board-rules.cjs` 验证棋规与电脑战术；通过 `PGLITE_MODULE_PATH` 指定临时 PGlite 路径，运行 `node scripts/verify-board-database.mjs` 验证服务端与本地一致性、房间权限和流程。浏览器在隔离测试站点使用两个独立账号，覆盖真实落子与回放；截图及临时浏览器脚本存放在项目目录外。
+
+## 2026-10-05 棋类扩展验证入口
+
+- `node scripts/verify-board-expanded.cjs`：三种新棋特殊走法与电脑战术。
+- `PGLITE_MODULE_PATH=... node scripts/verify-board-expanded-database.mjs`：隔离 PostgreSQL 对照、多人席位/排名、托管/中断、聊天权限与去重。
+- `PGLITE_MODULE_PATH=... node scripts/verify-board-upgrade.mjs`：创建首版房间和未完投票，再应用新版完整 SQL，验证继续操作与旧棋谱。
+- 原 `verify-board-rules.cjs`、`verify-board-database.mjs` 继续覆盖五子棋和象棋。浏览器验证在临时测试服务及浏览器内进行，不写入用户真实数据。

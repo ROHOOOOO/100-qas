@@ -1,10 +1,47 @@
 # Friends Games
 
-给熟人朋友玩的私密网页小游戏集合。当前包含 `100 Q&As` 和 `Friends Tycoon`。
+给熟人朋友玩的私密网页小游戏集合。当前源码包含 `100 Q&As`、`Friends Tycoon`、`What’s Next?` 和 `Board Games`。
 
 `100 Q&As` 是问答游戏：每位参与者独立回答同一房间的一组问题，完成提交后才能查看同一房间内其他朋友的答案。默认题库是 100 题，自定义题库支持 1 到 100 题。
 
 `Friends Tycoon` 是文字版线上大富翁：支持 2 到 6 位朋友同房间游玩，房主开始/重开/解散，轮流掷骰、买地、升级，聊天区与游戏记录分开。
+
+## 2026-10-03 功能更新
+
+- 新增 **What’s Next?** 随机转盘模块，支持共同抽取、各自抽取及房间共享历史。
+- 三个模块统一要求登录，登录状态在同一浏览器中记忆并自动续期。
+- 已完成实现及隔离环境验收；正式网站需要先升级 Supabase SQL，再发布前端。完整规格见 [What’s Next? 产品需求](docs/whats-next-requirements.md)。
+
+## 2026-10-04 账号更新
+
+- 登录账号与游戏用户名分开，用户名允许重复，可在“我的记录 → 账号设置”修改。
+- 游戏自动使用用户名，不再重复输入房间昵称；已有历史保留当时名称。
+- 注册时设置一个密保问题，从登录页的“忘记密码”可以重设密码，成功后所有设备需要重新登录。
+- 文案统一为“所有功能共用账号”。本轮没有旧账号补填流程。
+- 新版源码待发布，需要配套运行最新版 `supabase/schema.sql`。
+
+本地体验：[登录](http://127.0.0.1:8000/?backend=local#account)、[注册](http://127.0.0.1:8000/?backend=local#account/register)、[找回密码](http://127.0.0.1:8000/?backend=local#account/recover)。试玩账号只保存在当前浏览器。
+
+## 2026-10-04 转盘与输入调整
+
+- 密保答案支持中文、英文和数字混合输入，默认显示，可切换隐藏。
+- 转盘选项与抽取历史可分别折叠，默认收起，记住本浏览器每个房间的状态。
+- 动画接续上次角度，圈数与落点有所变化；抽取规则仍是等概率、独立、允许重复。
+- 本地与数据库版本共 100,000 次隔离抽取样本未发现明显分布或相邻重复异常，明细见当天开发记录。
+
+## 2026-10-04 棋类大厅
+
+- **Board Games** 首版含五子棋和中国象棋：好友双人房间，或房主添加简单/普通/困难电脑。
+- 登录后准备、开局；首局随机先手，下一局交换。支持悔棋、求和、认输；对手离线满 5 分钟可结束为中断，不计胜负。
+- 账号保存棋房、结果与完整事件棋谱；可逐步、拖动进度或自动回放，包括悔棋过程。
+- 详见 [棋类需求与规则](docs/board-games-requirements.md)。[本地试玩](http://127.0.0.1:8000/?backend=local#board)仅保存在当前浏览器。好友跨设备联机需要先升级 Supabase 并发布此版本。
+
+## 2026-10-05 五种棋与房间聊天
+
+- 补齐国际象棋、飞行棋与跳棋，支持好友或简单/普通/困难电脑；跳棋可选 2/3/4/6 人，飞行棋可选 2–4 人。
+- 飞行棋和跳棋继续到完整排名，保存结果及逐步回放；飞行棋可手动托管、回合结束接回，离开与托管独立。
+- 五种棋均有持续房间聊天，支持中文、英文和表情，换局后历史仍在，可折叠并保留发送失败的文字。
+- 最新源码用于本地预览；正式联机仍需升级完整 SQL 后发布。详见 [已确认规则](docs/board-games-requirements.md)。
 
 ## 项目文件指引
 
@@ -37,9 +74,9 @@
 3. 如需求、技术、设计规则发生变化，同步更新 `docs/` 中对应标准文件。
 4. 在最终回复中说明完成了什么、验证了什么、下一步建议做什么。
 
-## 当前状态
+## 早期开发记录
 
-截至 2026-08-04：
+以下为 2026-08-04 的历史状态，账号与转盘以本页最新更新为准：
 
 - 已读取并整理用户提供的 `100 Q&As.docx`。
 - 已确认项目整体名称升级为 `Friends Games`，`100 Q&As` 与 `Friends Tycoon` 为并列小游戏。
@@ -69,16 +106,32 @@
 - 最新规则已改为自定义题库 1 到 100 题；线上 3 题自定义题库双玩家验收已通过。
 - Friends Games 游戏大厅和 Friends Tycoon 入口已上线；线上测试房间 `D51B22` 已验证 2 位玩家提交 3 题成功。
 
+## 本地预览
+
+项目主目录：`/Users/rohooooo/Developer/100Q&As`（不在 iCloud 的桌面或文稿目录中）。
+
+```bash
+cd "/Users/rohooooo/Developer/100Q&As"
+python3 -m http.server 8000 --bind 127.0.0.1
+```
+
+访问 [What’s Next? 本地试玩](http://127.0.0.1:8000/?backend=local#spin)，注册一个试玩账号即可创建转盘。本地账号、房间和历史仅存在当前浏览器，与正式网站分开。刷新后保持登录；在“我的记录”重新进入房间。
+
 ## 当前上线状态
 
-网页已经上线，并已接入 Supabase。可以直接把下面的链接发给朋友使用：
+原有版本已上线并接入 Supabase。本次 What’s Next? 与统一登录的改动尚未发布：
 
 [https://rohooooo.github.io/100-qas/](https://rohooooo.github.io/100-qas/)
 
 ## 验证命令
 
 ```bash
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-static.mjs
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-browser.mjs
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-online.mjs
+node scripts/verify-static.mjs
+node scripts/verify-browser.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-online.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-whats-next.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-account.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-spin-controls.mjs
 ```
+
+数据库回归使用独立的 PGlite 内存数据库，具体依赖与命令见 [部署指南](docs/deployment-guide.md#验证命令)。

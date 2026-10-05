@@ -1,3 +1,6 @@
+-- Safe to rerun for existing projects: schema changes apply together and preserve records.
+begin;
+
 create extension if not exists pgcrypto;
 
 create table if not exists public.game_accounts (
@@ -8,6 +11,14 @@ create table if not exists public.game_accounts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.game_accounts
+  add column if not exists display_name text check (char_length(display_name) between 1 and 20),
+  add column if not exists security_question integer check (security_question between 1 and 5),
+  add column if not exists security_answer_hash text,
+  add column if not exists recovery_failures integer not null default 0,
+  add column if not exists recovery_window_started_at timestamptz,
+  add column if not exists recovery_blocked_until timestamptz;
 
 create table if not exists public.game_account_sessions (
   token_hash text primary key,
@@ -127,33 +138,40 @@ revoke all on public.qa_players from anon, authenticated;
 revoke all on public.qa_answers from anon, authenticated;
 grant usage on schema public to anon, authenticated;
 
-create or replace function public.game_account_id_from_token(
-  p_account_token text
-)
-returns uuid
-language plpgsql
-security definer
-set search_path = public
+alter table public.qa_players add column if not exists submitted_name text;
+
+create or replace function public.game_account_id_from_token(p_account_token text)
+returns uuid language plpgsql security definer set search_path = public
 as $$
-declare
-  v_account_id uuid;
+declare v_account_id uuid; v_hash text;
 begin
-  if coalesce(btrim(p_account_token), '') = '' then
-    return null;
-  end if;
-
-  delete from public.game_account_sessions
-   where expires_at <= now();
-
-  select s.account_id
-    into v_account_id
-    from public.game_account_sessions s
-   where s.token_hash = encode(extensions.digest(p_account_token, 'sha256'), 'hex')
-     and s.expires_at > now();
-
+  if coalesce(btrim(p_account_token), '') = '' then raise exception 'Login required.'; end if;
+  v_hash := encode(extensions.digest(p_account_token, 'sha256'), 'hex');
+  select account_id into v_account_id from public.game_account_sessions where token_hash=v_hash and expires_at>now();
+  if v_account_id is null then raise exception 'Login required.'; end if;
+  perform 1 from public.game_accounts where id=v_account_id for update;
+  update public.game_account_sessions set expires_at=clock_timestamp()+interval '90 days'
+    where token_hash=v_hash and expires_at>clock_timestamp() returning account_id into v_account_id;
+  if not found then raise exception 'Login required.'; end if;
   return v_account_id;
 end;
 $$;
+
+create or replace function public.account_refresh(p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public
+as $$
+declare v_id uuid := public.game_account_id_from_token(p_account_token); v_result jsonb;
+begin
+  select jsonb_build_object('token', p_account_token, 'expiresAt', s.expires_at,
+    'account', jsonb_build_object('id', a.id, 'username', a.username, 'displayName', a.display_name)) into v_result
+  from public.game_account_sessions s join public.game_accounts a on a.id = s.account_id
+  where s.token_hash = encode(extensions.digest(p_account_token, 'sha256'), 'hex') and s.account_id = v_id;
+  if v_result is null then raise exception 'Login required.'; end if;
+  return v_result;
+end;
+$$;
+revoke execute on function public.account_refresh(text) from public;
+grant execute on function public.account_refresh(text) to anon, authenticated;
 
 create or replace function public.account_session_payload(
   p_account public.game_accounts
@@ -173,7 +191,8 @@ begin
   return jsonb_build_object(
     'account', jsonb_build_object(
       'id', p_account.id,
-      'username', p_account.username
+      'username', p_account.username,
+      'displayName', p_account.display_name
     ),
     'token', v_token,
     'expiresAt', v_expires_at
@@ -181,9 +200,14 @@ begin
 end;
 $$;
 
+drop function if exists public.account_register(text, text);
+
 create or replace function public.account_register(
   p_username text,
-  p_password text
+  p_password text,
+  p_display_name text,
+  p_security_question integer,
+  p_security_answer text
 )
 returns jsonb
 language plpgsql
@@ -205,8 +229,15 @@ begin
     raise exception 'Password is too short.';
   end if;
 
-  insert into public.game_accounts (username, username_key, password_hash)
-  values (v_username, v_username_key, extensions.crypt(p_password, extensions.gen_salt('bf')))
+  if octet_length(p_password) > 72 then raise exception 'Password is too long.'; end if;
+  if char_length(btrim(coalesce(p_display_name,''))) not between 1 and 20 then raise exception 'Invalid display name.'; end if;
+  if p_security_question is null or p_security_question not between 1 and 5 then raise exception 'Invalid security question.'; end if;
+  if char_length(btrim(coalesce(p_security_answer,''))) not between 1 and 100 then raise exception 'Invalid security answer.'; end if;
+
+  insert into public.game_accounts (username, username_key, password_hash, display_name, security_question, security_answer_hash)
+  values (v_username, v_username_key, extensions.crypt(p_password, extensions.gen_salt('bf',10)),
+    btrim(p_display_name),p_security_question,
+    extensions.crypt(encode(extensions.digest(lower(btrim(p_security_answer)),'sha256'),'hex'),extensions.gen_salt('bf',10)))
   returning *
   into v_account;
 
@@ -233,7 +264,7 @@ begin
   select *
     into v_account
     from public.game_accounts
-   where username_key = v_username_key;
+   where username_key = v_username_key for update;
 
   if not found or v_account.password_hash <> extensions.crypt(coalesce(p_password, ''), v_account.password_hash) then
     raise exception 'Invalid username or password.';
@@ -301,8 +332,7 @@ begin
      where id = p_player_id
        and room_id = v_room.id
        and (
-         (p_player_key is not null and player_key = p_player_key)
-         or (v_account_id is not null and account_id = v_account_id)
+         account_id = v_account_id
        );
 
     v_has_current := found;
@@ -349,6 +379,7 @@ begin
           'nickname', player_rows.nickname,
           'createdAt', player_rows.created_at,
           'submittedAt', player_rows.submitted_at,
+          'submittedName', player_rows.submitted_name,
           'answerCount', player_rows.answer_count,
           'answers', player_rows.answers
         )
@@ -360,6 +391,7 @@ begin
           p.nickname,
           p.created_at,
           p.submitted_at,
+          p.submitted_name,
           (
             select count(*)
               from public.qa_answers a
@@ -490,7 +522,7 @@ declare
   v_account_id uuid := public.game_account_id_from_token(p_account_token);
   v_nickname text;
 begin
-  v_nickname := left(btrim(p_nickname), 20);
+  select display_name into v_nickname from public.game_accounts where id=v_account_id;
 
   if v_nickname = '' then
     raise exception 'Nickname is required.';
@@ -529,8 +561,8 @@ begin
   values (v_room.id, v_nickname, p_player_key, v_account_id)
   on conflict (room_id, player_key)
   do update set
-    nickname = excluded.nickname,
-    account_id = coalesce(public.qa_players.account_id, excluded.account_id)
+    nickname = excluded.nickname
+  where public.qa_players.account_id = v_account_id
   returning *
   into v_player;
 
@@ -574,8 +606,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found then
@@ -643,8 +674,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found then
@@ -685,7 +715,7 @@ begin
   end if;
 
   update public.qa_players
-     set submitted_at = now()
+     set submitted_at = now(), submitted_name = nickname
    where id = v_player.id
    returning *
    into v_player;
@@ -694,7 +724,8 @@ begin
 end;
 $$;
 
-grant execute on function public.account_register(text, text) to anon, authenticated;
+revoke execute on function public.account_register(text, text, text, integer, text) from public;
+grant execute on function public.account_register(text, text, text, integer, text) to anon, authenticated;
 grant execute on function public.account_login(text, text) to anon, authenticated;
 grant execute on function public.account_logout(text) to anon, authenticated;
 grant execute on function public.qa_create_room(jsonb, text) to anon, authenticated;
@@ -948,8 +979,7 @@ begin
      where id = p_player_id
        and room_id = v_room.id
        and (
-         (p_player_key is not null and player_key = p_player_key)
-         or (v_account_id is not null and account_id = v_account_id)
+         account_id = v_account_id
        );
 
     v_has_current := found;
@@ -965,6 +995,13 @@ begin
      limit 1;
 
     v_has_current := found;
+  end if;
+
+  if not v_has_current then
+    return jsonb_build_object('room', jsonb_build_object('id', v_room.id, 'code', v_room.code,
+      'status', v_room.status, 'createdAt', v_room.created_at, 'map', v_room.map),
+      'currentPlayerId', null, 'players', '[]'::jsonb, 'properties', '[]'::jsonb,
+      'logs', '[]'::jsonb, 'messages', '[]'::jsonb);
   end if;
 
   return jsonb_build_object(
@@ -1403,7 +1440,7 @@ declare
   v_attempts integer := 0;
   v_nickname text;
 begin
-  v_nickname := left(btrim(p_nickname), 20);
+  select display_name into v_nickname from public.game_accounts where id=v_account_id;
   if v_nickname = '' then
     raise exception 'Nickname is required.';
   end if;
@@ -1492,7 +1529,7 @@ declare
   v_nickname text;
   v_player_count integer;
 begin
-  v_nickname := left(btrim(p_nickname), 20);
+  select display_name into v_nickname from public.game_accounts where id=v_account_id;
   if v_nickname = '' then
     raise exception 'Nickname is required.';
   end if;
@@ -1549,8 +1586,8 @@ begin
   do update set
     nickname = excluded.nickname,
     color_id = public.tycoon_pick_color_id(v_room.id, excluded.color_id, public.tycoon_players.id),
-    account_id = coalesce(public.tycoon_players.account_id, excluded.account_id),
     updated_at = now()
+  where public.tycoon_players.account_id = v_account_id
   returning *
   into v_player;
 
@@ -1599,8 +1636,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      )
    for update;
 
@@ -1651,8 +1687,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.host_player_id <> v_player.id then
@@ -1753,8 +1788,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      )
    for update;
 
@@ -1888,8 +1922,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      )
    for update;
 
@@ -1954,8 +1987,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      )
    for update;
 
@@ -2013,8 +2045,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action is null then
@@ -2053,8 +2084,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.status <> 'active' or v_room.current_player_id <> v_player.id or v_room.turn_phase <> 'action' or v_room.pending_action is null then
@@ -2088,6 +2118,7 @@ declare
   v_room public.tycoon_rooms%rowtype;
   v_player public.tycoon_players%rowtype;
   v_action_text text;
+  v_account_id uuid := public.game_account_id_from_token(p_account_token);
 begin
   select *
     into v_room
@@ -2097,6 +2128,10 @@ begin
 
   if not found then
     raise exception 'Room not found.';
+  end if;
+
+  if not exists (select 1 from public.tycoon_players where room_id = v_room.id and account_id = v_account_id) then
+    raise exception 'Room membership required.';
   end if;
 
   if v_room.status = 'active'
@@ -2145,8 +2180,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      )
    for update;
 
@@ -2217,8 +2251,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.host_player_id <> v_player.id then
@@ -2277,8 +2310,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.host_player_id <> v_player.id then
@@ -2342,8 +2374,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.host_player_id <> v_player.id then
@@ -2398,8 +2429,7 @@ begin
    where id = p_player_id
      and room_id = v_room.id
      and (
-       (p_player_key is not null and player_key = p_player_key)
-       or (v_account_id is not null and account_id = v_account_id)
+       account_id = v_account_id
      );
 
   if not found or v_room.status in ('finished', 'closed') or v_player.status = 'bankrupt' then
@@ -2568,9 +2598,9 @@ begin
               'createdAt', r.created_at,
               'joinedAt', p.created_at
             ) as item
-          from public.qa_players p
-          join public.qa_rooms r on r.id = p.room_id
-          where p.account_id = v_account_id
+          from public.qa_rooms r
+          left join public.qa_players p on p.room_id = r.id and p.account_id = v_account_id
+          where r.owner_account_id = v_account_id or p.account_id = v_account_id
           order by greatest(coalesce(p.submitted_at, p.created_at), r.created_at) desc
           limit 80
         ) qa_rows
@@ -2601,7 +2631,13 @@ begin
           order by greatest(r.updated_at, p.updated_at, p.created_at) desc
           limit 80
         ) tycoon_rows
-    ), '[]'::jsonb)
+    ), '[]'::jsonb),
+    'spin', coalesce((select jsonb_agg(jsonb_build_object(
+      'roomCode', r.code, 'title', r.title, 'mode', r.mode,
+      'isHost', r.owner_account_id = v_account_id, 'joinedAt', m.joined_at)
+      order by r.updated_at desc) from public.spin_members m
+      join public.spin_rooms r on r.id = m.room_id where m.account_id = v_account_id), '[]'::jsonb)
+
   );
 end;
 $$;
@@ -2636,3 +2672,891 @@ grant execute on function public.tycoon_remove_player(text, uuid, text, uuid, te
 grant execute on function public.tycoon_restart_room(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_close_room(text, uuid, text, text) to anon, authenticated;
 grant execute on function public.tycoon_send_message(text, uuid, text, text, text) to anon, authenticated;
+
+-- What’s Next? Account-owned rooms and append-only draw history.
+create table if not exists public.spin_rooms (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  owner_account_id uuid not null references public.game_accounts(id),
+  title text not null check (char_length(title) between 1 and 60),
+  options text[] not null check (cardinality(options) between 2 and 50),
+  mode text not null check (mode in ('shared','individual')),
+  version bigint not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists spin_rooms_owner_idx on public.spin_rooms(owner_account_id);
+create table if not exists public.spin_members (
+  room_id uuid not null references public.spin_rooms(id) on delete cascade,
+  account_id uuid not null references public.game_accounts(id),
+  joined_at timestamptz not null default now(),
+  primary key(room_id, account_id)
+);
+create index if not exists spin_members_account_idx on public.spin_members(account_id, joined_at desc);
+create table if not exists public.spin_draws (
+  id bigint generated always as identity primary key,
+  room_id uuid not null references public.spin_rooms(id) on delete cascade,
+  account_id uuid not null references public.game_accounts(id),
+  request_id uuid not null,
+  actor_name text not null,
+  mode text not null check (mode in ('shared','individual')),
+  options_snapshot text[] not null,
+  result_index integer not null,
+  result text not null,
+  started_at timestamptz not null,
+  ends_at timestamptz not null,
+  unique(room_id, account_id, request_id),
+  check(result_index >= 0 and result_index < cardinality(options_snapshot))
+);
+create index if not exists spin_draws_room_history_idx on public.spin_draws(room_id, id desc);
+create index if not exists spin_draws_room_active_idx on public.spin_draws(room_id, ends_at desc);
+create index if not exists spin_draws_member_idx on public.spin_draws(room_id, account_id, id desc);
+alter table public.spin_rooms enable row level security;
+alter table public.spin_members enable row level security;
+alter table public.spin_draws enable row level security;
+revoke all on public.spin_rooms, public.spin_members, public.spin_draws from public, anon, authenticated;
+revoke all on sequence public.spin_draws_id_seq from public, anon, authenticated;
+
+create or replace function public.spin_validate_options(p_options text[])
+returns text[] language plpgsql set search_path = public as $$
+declare v_options text[];
+begin
+  if p_options is null or cardinality(p_options) not between 2 and 50 then
+    raise exception 'Use 2 to 50 options.';
+  end if;
+  select array_agg(btrim(value) order by ordinality) into v_options
+    from unnest(p_options) with ordinality as x(value, ordinality);
+  if exists(select 1 from unnest(v_options) v where v is null or char_length(v) not between 1 and 60) then
+    raise exception 'Each option must contain 1 to 60 characters.';
+  end if;
+  if (select count(distinct v) from unnest(v_options) v) <> cardinality(v_options) then
+    raise exception 'Options must be unique.';
+  end if;
+  return v_options;
+end;
+$$;
+create or replace function public.spin_draw_json(p_draw public.spin_draws)
+returns jsonb language sql stable set search_path = public as $$
+  select jsonb_build_object('id', p_draw.id::text, 'accountId', p_draw.account_id,
+    'actor', p_draw.actor_name, 'mode', p_draw.mode, 'options', p_draw.options_snapshot,
+    'index', p_draw.result_index, 'result', p_draw.result,
+    'startedAt', p_draw.started_at, 'endsAt', p_draw.ends_at);
+$$;
+
+create or replace function public.spin_get_room(p_room_code text, p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_room public.spin_rooms%rowtype;
+begin
+  select * into v_room from public.spin_rooms where code = upper(btrim(p_room_code));
+  if not found then raise exception 'Room not found.'; end if;
+  if not exists(select 1 from public.spin_members where room_id = v_room.id and account_id = v_account) then
+    return jsonb_build_object('room',jsonb_build_object('code',v_room.code,'title',v_room.title),'isMember',false);
+  end if;
+  return jsonb_build_object('room', jsonb_build_object('code',v_room.code,'title',v_room.title,
+    'options',v_room.options,'mode',v_room.mode,'version',v_room.version,
+    'isHost',v_room.owner_account_id = v_account), 'isMember',true,'serverNow',clock_timestamp(),
+    'members',(select jsonb_agg(a.display_name order by m.joined_at) from public.spin_members m
+      join public.game_accounts a on a.id = m.account_id where m.room_id = v_room.id),
+    'activeUntil',(select max(ends_at) from public.spin_draws where room_id = v_room.id),
+    'lastShared',(select public.spin_draw_json(d) from public.spin_draws d where room_id = v_room.id and mode='shared' order by id desc limit 1),
+    'lastPersonal',(select public.spin_draw_json(d) from public.spin_draws d where room_id = v_room.id and account_id=v_account and mode='individual' order by id desc limit 1),
+    'history',coalesce((select jsonb_agg(public.spin_draw_json(d) order by d.id desc)
+      from (select * from public.spin_draws where room_id=v_room.id order by id desc limit 25) d),'[]'::jsonb));
+end;
+$$;
+create or replace function public.spin_create_room(p_title text,p_options text[],p_mode text,p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_code text; v_id uuid;
+  v_options text[] := public.spin_validate_options(p_options); v_attempts integer := 0;
+begin
+  if p_title is null or char_length(btrim(p_title)) not between 1 and 60 then raise exception 'Room title is required (1 to 60 characters).'; end if;
+  if p_mode is null or p_mode not in ('shared','individual') then raise exception 'Invalid mode.'; end if;
+  loop
+    v_attempts := v_attempts + 1;
+    v_code := upper(substr(replace(gen_random_uuid()::text,'-',''),1,6));
+    begin
+      insert into public.spin_rooms(code,owner_account_id,title,options,mode)
+      values(v_code,v_account,btrim(p_title),v_options,p_mode) returning id into v_id;
+      exit;
+    exception when unique_violation then if v_attempts >= 8 then raise; end if;
+    end;
+  end loop;
+  insert into public.spin_members(room_id,account_id) values(v_id,v_account);
+  return public.spin_get_room(v_code,p_account_token);
+end;
+$$;
+create or replace function public.spin_join_room(p_room_code text,p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_room uuid;
+begin
+  select id into v_room from public.spin_rooms where code=upper(btrim(p_room_code));
+  if not found then raise exception 'Room not found.'; end if;
+  insert into public.spin_members(room_id,account_id) values(v_room,v_account) on conflict do nothing;
+  return public.spin_get_room(p_room_code,p_account_token);
+end;
+$$;
+create or replace function public.spin_update_room(p_room_code text,p_title text,p_options text[],p_mode text,p_version bigint,p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_room public.spin_rooms%rowtype;
+  v_options text[] := public.spin_validate_options(p_options);
+begin
+  select * into v_room from public.spin_rooms where code=upper(btrim(p_room_code)) for update;
+  if not found then raise exception 'Room not found.'; end if;
+  if v_room.owner_account_id <> v_account then raise exception 'Only host can edit.'; end if;
+  if p_version is distinct from v_room.version then raise exception 'Room changed. Reload before saving.'; end if;
+  if exists(select 1 from public.spin_draws where room_id=v_room.id and ends_at > clock_timestamp()) then raise exception 'Spin in progress.'; end if;
+  if p_title is null or char_length(btrim(p_title)) not between 1 and 60 then raise exception 'Room title is required (1 to 60 characters).'; end if;
+  if p_mode is null or p_mode not in ('shared','individual') then raise exception 'Invalid mode.'; end if;
+  update public.spin_rooms set title=btrim(p_title), options=v_options, mode=p_mode,
+    version=version+1,updated_at=now() where id=v_room.id;
+  return public.spin_get_room(p_room_code,p_account_token);
+end;
+$$;
+create or replace function public.spin_draw(p_room_code text,p_request_id uuid,p_account_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_room public.spin_rooms%rowtype;
+  v_draw public.spin_draws%rowtype; v_now timestamptz; v_index integer; v_name text;
+begin
+  if p_request_id is null then raise exception 'Request id required.'; end if;
+  select * into v_room from public.spin_rooms where code=upper(btrim(p_room_code)) for update;
+  if not found then raise exception 'Room not found.'; end if;
+  if not exists(select 1 from public.spin_members where room_id=v_room.id and account_id=v_account) then raise exception 'Room membership required.'; end if;
+  select * into v_draw from public.spin_draws where room_id=v_room.id and account_id=v_account and request_id=p_request_id;
+  if found then return jsonb_build_object('draw',public.spin_draw_json(v_draw),'serverNow',clock_timestamp()); end if;
+  v_now := clock_timestamp();
+  if exists(select 1 from public.spin_draws where room_id=v_room.id and ends_at>v_now
+    and (v_room.mode='shared' or account_id=v_account)) then raise exception 'Spin in progress.'; end if;
+  v_index := floor(random()*cardinality(v_room.options))::integer;
+  select display_name into v_name from public.game_accounts where id=v_account;
+  insert into public.spin_draws(room_id,account_id,request_id,actor_name,mode,options_snapshot,result_index,result,started_at,ends_at)
+  values(v_room.id,v_account,p_request_id,v_name,v_room.mode,v_room.options,v_index,v_room.options[v_index+1],v_now,v_now+interval '4 seconds') returning * into v_draw;
+  update public.spin_rooms set updated_at=v_now where id=v_room.id;
+  return jsonb_build_object('draw',public.spin_draw_json(v_draw),'serverNow',clock_timestamp());
+end;
+$$;
+create or replace function public.spin_get_history(p_room_code text,p_account_token text,p_before_id bigint default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account uuid := public.game_account_id_from_token(p_account_token); v_room uuid;
+begin
+  select r.id into v_room from public.spin_rooms r join public.spin_members m on m.room_id=r.id
+    where r.code=upper(btrim(p_room_code)) and m.account_id=v_account;
+  if v_room is null then raise exception 'Room membership required.'; end if;
+  return coalesce((select jsonb_agg(public.spin_draw_json(d) order by d.id desc)
+    from (select * from public.spin_draws where room_id=v_room and (p_before_id is null or id<p_before_id) order by id desc limit 25) d),'[]'::jsonb);
+end;
+$$;
+revoke execute on function public.spin_validate_options(text[]) from public,anon,authenticated;
+revoke execute on function public.spin_draw_json(public.spin_draws) from public,anon,authenticated;
+revoke execute on function public.spin_get_room(text,text),public.spin_create_room(text,text[],text,text),
+  public.spin_join_room(text,text),public.spin_update_room(text,text,text[],text,bigint,text),
+  public.spin_draw(text,uuid,text),public.spin_get_history(text,text,bigint) from public;
+grant execute on function public.spin_get_room(text,text),public.spin_create_room(text,text[],text,text),
+  public.spin_join_room(text,text),public.spin_update_room(text,text,text[],text,bigint,text),
+  public.spin_draw(text,uuid,text),public.spin_get_history(text,text,bigint) to anon,authenticated;
+
+-- Account recovery limits apply only to recovery; regular password login stays available.
+create table if not exists public.game_account_recoveries (
+  account_id uuid primary key references public.game_accounts(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null
+);
+alter table public.game_account_recoveries enable row level security;
+revoke all on public.game_account_recoveries from public, anon, authenticated;
+
+create or replace function public.account_update_profile(p_account_token text, p_display_name text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_id uuid := public.game_account_id_from_token(p_account_token); v_name text := btrim(coalesce(p_display_name,''));
+begin
+  if char_length(v_name) not between 1 and 20 then raise exception 'Invalid display name.'; end if;
+  update public.game_accounts set display_name=v_name, updated_at=now() where id=v_id;
+  update public.qa_players set nickname=v_name where account_id=v_id;
+  update public.tycoon_players set nickname=v_name, updated_at=now() where account_id=v_id;
+  -- Submitted QA names, finished rankings, chat/log text and draw actors are snapshots.
+  return public.account_refresh(p_account_token);
+end;
+$$;
+
+create or replace function public.account_recovery_question(p_username text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_question integer;
+begin
+  select security_question into v_question from public.game_accounts where username_key=lower(btrim(p_username));
+  -- The same response shape is used for missing accounts. Answers are never returned.
+  return jsonb_build_object('questionId',coalesce(v_question,1));
+end;
+$$;
+
+create or replace function public.account_verify_recovery(p_username text, p_answer text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_account public.game_accounts%rowtype; v_answer text := lower(btrim(coalesce(p_answer,'')));
+  v_failures integer; v_token text; v_hash text; v_now timestamptz := clock_timestamp();
+begin
+  if char_length(v_answer) not between 1 and 100 then
+    return jsonb_build_object('ok',false,'error','Recovery verification failed.');
+  end if;
+  select * into v_account from public.game_accounts where username_key=lower(btrim(p_username)) for update;
+  if not found or v_account.security_answer_hash is null then
+    -- Match the password hash work of a real account without creating recovery state.
+    perform extensions.crypt(encode(extensions.digest(v_answer,'sha256'),'hex'),extensions.gen_salt('bf',10));
+    return jsonb_build_object('ok',false,'error','Recovery verification failed.');
+  end if;
+  v_now := clock_timestamp();
+  if v_account.recovery_blocked_until > v_now then
+    return jsonb_build_object('ok',false,'error','Recovery temporarily blocked.',
+      'retryAfter',ceil(extract(epoch from v_account.recovery_blocked_until-v_now)));
+  end if;
+  v_hash := extensions.crypt(encode(extensions.digest(v_answer,'sha256'),'hex'),v_account.security_answer_hash);
+  if v_hash <> v_account.security_answer_hash then
+    v_failures := case when v_account.recovery_window_started_at > v_now-interval '15 minutes'
+      then v_account.recovery_failures+1 else 1 end;
+    update public.game_accounts set recovery_failures=v_failures,
+      recovery_window_started_at=case when v_failures=1 then v_now else recovery_window_started_at end,
+      recovery_blocked_until=case when v_failures>=5 then v_now+interval '15 minutes' else null end
+      where id=v_account.id;
+    -- Returning a failure instead of raising preserves the attempt counter on commit.
+    return jsonb_build_object('ok',false,'error',case when v_failures>=5 then 'Recovery temporarily blocked.' else 'Recovery verification failed.' end,
+      'retryAfter',case when v_failures>=5 then 900 else 0 end);
+  end if;
+  v_token := encode(extensions.gen_random_bytes(32),'hex');
+  insert into public.game_account_recoveries(account_id,token_hash,expires_at)
+    values(v_account.id,encode(extensions.digest(v_token,'sha256'),'hex'),v_now+interval '10 minutes')
+    on conflict(account_id) do update set token_hash=excluded.token_hash,expires_at=excluded.expires_at;
+  update public.game_accounts set recovery_failures=0,recovery_window_started_at=null,recovery_blocked_until=null where id=v_account.id;
+  return jsonb_build_object('ok',true,'resetToken',v_token,'expiresAt',v_now+interval '10 minutes');
+end;
+$$;
+
+create or replace function public.account_reset_password(p_reset_token text, p_password text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_hash text := encode(extensions.digest(coalesce(p_reset_token,''),'sha256'),'hex');
+begin
+  if char_length(coalesce(p_password,'')) < 4 then raise exception 'Password is too short.'; end if;
+  if octet_length(p_password) > 72 then raise exception 'Password is too long.'; end if;
+  select account_id into v_id from public.game_account_recoveries where token_hash=v_hash;
+  if v_id is null then return jsonb_build_object('ok',false,'error','Reset token expired or used.'); end if;
+  -- All recovery writes lock the account first so concurrent verification/reset cannot race.
+  perform 1 from public.game_accounts where id=v_id for update;
+  delete from public.game_account_recoveries where account_id=v_id and token_hash=v_hash and expires_at>clock_timestamp();
+  if not found then return jsonb_build_object('ok',false,'error','Reset token expired or used.'); end if;
+  update public.game_accounts set password_hash=extensions.crypt(p_password,extensions.gen_salt('bf',10)),
+    updated_at=now(),recovery_failures=0,recovery_window_started_at=null,recovery_blocked_until=null where id=v_id;
+  delete from public.game_account_sessions where account_id=v_id;
+  return jsonb_build_object('ok',true);
+end;
+$$;
+revoke execute on function public.account_update_profile(text,text),public.account_recovery_question(text),
+  public.account_verify_recovery(text,text),public.account_reset_password(text,text) from public;
+grant execute on function public.account_update_profile(text,text),public.account_recovery_question(text),
+  public.account_verify_recovery(text,text),public.account_reset_password(text,text) to anon,authenticated;
+
+-- Board Games: private rooms, immutable match participants, full event replays.
+create table if not exists public.board_rooms (
+  code text primary key, kind text not null check(kind in ('gomoku','xiangqi')), title text not null check(char_length(title) between 1 and 60),
+  owner_id uuid not null references public.game_accounts(id), guest_id uuid references public.game_accounts(id),
+  bot_level text check(bot_level in ('easy','normal','hard')), host_ready boolean not null default false, guest_ready boolean not null default false,
+  host_seen timestamptz not null default now(), guest_seen timestamptz, host_side integer not null default 0,
+  round integer not null default 0, revision integer not null default 0, match_id uuid,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  check(guest_id is null or (bot_level is null and guest_id<>owner_id))
+);
+create index if not exists board_rooms_owner_idx on public.board_rooms(owner_id,updated_at desc);
+create index if not exists board_rooms_guest_idx on public.board_rooms(guest_id,updated_at desc) where guest_id is not null;
+create table if not exists public.board_matches (
+  id uuid primary key default gen_random_uuid(), room_code text not null references public.board_rooms(code), kind text not null,
+  round integer not null, accounts uuid[] not null, players jsonb not null, state jsonb not null, pending jsonb,
+  events jsonb not null default '[]', status text not null default 'active' check(status in ('active','finished','interrupted')),
+  created_at timestamptz not null default now(), ended_at timestamptz, unique(room_code,round)
+);
+create index if not exists board_matches_accounts_idx on public.board_matches using gin(accounts);
+create index if not exists board_matches_room_idx on public.board_matches(room_code,created_at desc);
+create table if not exists public.board_requests (
+  room_code text not null references public.board_rooms(code), account_id uuid not null references public.game_accounts(id),
+  request_id uuid not null, primary key(room_code,account_id,request_id)
+);
+alter table public.board_rooms enable row level security;
+alter table public.board_matches enable row level security;
+alter table public.board_requests enable row level security;
+revoke all on public.board_rooms,public.board_matches,public.board_requests from public,anon,authenticated;
+
+create or replace function public.board_initial(p_kind text) returns jsonb language plpgsql immutable set search_path=public as $$
+declare b integer[]; row_p integer[]:=array[5,4,3,2,1,2,3,4,5]; i integer;
+begin
+ if p_kind not in ('gomoku','xiangqi') or p_kind is null then raise exception 'Invalid game.';end if;
+ b:=array_fill(0,array[case when p_kind='gomoku' then 225 else 90 end]);
+ if p_kind='xiangqi' then
+  for i in 0..8 loop b[i+1]:=-row_p[i+1];b[82+i]:=row_p[i+1];end loop;
+  foreach i in array array[1,7] loop b[19+i]:=-6;b[64+i]:=6;end loop;
+  foreach i in array array[0,2,4,6,8] loop b[28+i]:=-7;b[55+i]:=7;end loop;
+ end if;
+ return jsonb_build_object('kind',p_kind,'board',b,'turn',1,'moves','[]'::jsonb,'positions',jsonb_build_array(jsonb_build_object('key',array_to_string(b,',')||':1','actor',0,'check',false)),'result',null);
+end;$$;
+create or replace function public.board_pseudo(b integer[],f integer,t integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare p integer; s integer; x integer; y integer; tx integer; ty integer; dx integer; dy integer; blocks integer:=0; step integer; i integer; palace boolean;
+begin
+ if f is null or t is null or f<0 or f>=90 or t<0 or t>=90 or f=t then return false;end if;
+ p:=b[f+1];s:=sign(p);if s=0 or sign(b[t+1])=s then return false;end if;
+ x:=f%9;y:=f/9;tx:=t%9;ty:=t/9;dx:=tx-x;dy:=ty-y;
+ palace:=tx between 3 and 5 and (case when s=1 then ty>=7 else ty<=2 end);
+ if dx=0 or dy=0 then step:=case when dx=0 then sign(dy)*9 else sign(dx) end;i:=f+step;
+  while i<>t loop if b[i+1]<>0 then blocks:=blocks+1;end if;i:=i+step;end loop;
+ end if;
+ case abs(p)
+ when 1 then return (abs(b[t+1])=1 and dx=0 and blocks=0) or (palace and abs(dx)+abs(dy)=1);
+ when 2 then return palace and abs(dx)=1 and abs(dy)=1;
+ when 3 then return abs(dx)=2 and abs(dy)=2 and (case when s=1 then ty>=5 else ty<=4 end) and b[f+dy/2*9+dx/2+1]=0;
+ when 4 then return (abs(dx)=2 and abs(dy)=1 and b[f+sign(dx)::integer+1]=0) or (abs(dx)=1 and abs(dy)=2 and b[f+sign(dy)::integer*9+1]=0);
+ when 5 then return (dx=0 or dy=0) and blocks=0;
+ when 6 then return (dx=0 or dy=0) and blocks=(case when b[t+1]=0 then 0 else 1 end);
+ when 7 then return (dx=0 and dy=-s) or ((case when s=1 then y<=4 else y>=5 end) and dy=0 and abs(dx)=1);
+ else return false;end case;
+end;$$;
+create or replace function public.board_checked(b integer[],s integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare k integer:=array_position(b,s)-1;i integer;
+begin
+ if k is null then return true;end if;
+ for i in 0..89 loop if sign(b[i+1])=-s and public.board_pseudo(b,i,k) then return true;end if;end loop;return false;
+end;$$;
+create or replace function public.board_legal(p_kind text,b integer[],s integer,f integer,t integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare n integer[]:=b;
+begin
+ if t is null or t<0 or t>=cardinality(b) then return false;end if;
+ if p_kind='gomoku' then return b[t+1]=0;end if;
+ if f is null or f<0 or f>=90 or sign(b[f+1])<>s or abs(b[t+1])=1 or not public.board_pseudo(b,f,t) then return false;end if;
+ n[t+1]:=n[f+1];n[f+1]:=0;return not public.board_checked(n,s);
+end;$$;
+create or replace function public.board_has_move(b integer[],s integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare f integer;t integer;
+begin
+ for f in 0..89 loop if sign(b[f+1])=s then for t in 0..89 loop if public.board_legal('xiangqi',b,s,f,t) then return true;end if;end loop;end if;end loop;return false;
+end;$$;
+create or replace function public.board_play(p_state jsonb,p_move jsonb) returns jsonb language plpgsql immutable set search_path=public as $$
+declare v_kind text:=p_state->>'kind';b integer[];s integer:=(p_state->>'turn')::integer; f integer; t integer;
+ entry jsonb;pos jsonb;list jsonb;res jsonb:='null';n integer;dx integer;dy integer;dir integer;x integer;y integer;a integer;c integer;k text;first_ord bigint;red boolean;black boolean;
+begin
+ if jsonb_typeof(p_move->'to') is distinct from 'number' or (v_kind='xiangqi' and jsonb_typeof(p_move->'from') is distinct from 'number') then raise exception 'Illegal move.';end if;
+ f:=case when v_kind='gomoku' then -1 else (p_move->>'from')::integer end;t:=(p_move->>'to')::integer;
+ select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(p_state->'board') with ordinality;
+ if p_state->'result'<>'null'::jsonb or not public.board_legal(v_kind,b,s,f,t) then raise exception 'Illegal move.';end if;
+ entry:=jsonb_build_object('from',f,'to',t,'side',s,'piece',case when v_kind='gomoku' then s else b[f+1] end,'captured',b[t+1]);
+ b[t+1]:=(entry->>'piece')::integer;if f>=0 then b[f+1]:=0;end if;
+ k:=array_to_string(b,',')||':'||(-s)::text;
+ pos:=(p_state->'positions')||jsonb_build_array(jsonb_build_object('key',k,'actor',s,'check',v_kind='xiangqi' and public.board_checked(b,-s)));
+ list:=(p_state->'moves')||jsonb_build_array(entry);
+ if v_kind='gomoku' then
+  x:=t%15;y:=t/15;
+  for dx,dy in select * from (values(1,0),(0,1),(1,1),(1,-1)) as d(x,y) loop
+   n:=1;foreach dir in array array[-1,1] loop a:=x+dx*dir;c:=y+dy*dir;
+    while a between 0 and 14 and c between 0 and 14 and b[c*15+a+1]=s loop n:=n+1;a:=a+dx*dir;c:=c+dy*dir;end loop;
+   end loop;if n>=5 then res:=jsonb_build_object('winner',s,'reason','five');exit;end if;
+  end loop;
+  if res='null' and not 0=any(b) then res:=jsonb_build_object('winner',0,'reason','full');end if;
+ else
+  if not public.board_has_move(b,-s) then res:=jsonb_build_object('winner',s,'reason',case when public.board_checked(b,-s) then 'checkmate' else 'stalemate' end);
+  elsif (select count(*) from jsonb_array_elements(pos) q where q->>'key'=k)>=3 then
+   select min(ord) into first_ord from(select ordinality ord from jsonb_array_elements(pos) with ordinality where value->>'key'=k order by ordinality desc limit 3) q;
+   select bool_and((value->>'check')::boolean) filter(where (value->>'actor')::integer=1),bool_and((value->>'check')::boolean) filter(where (value->>'actor')::integer=-1)
+    into red,black from jsonb_array_elements(pos) with ordinality where ordinality>first_ord;
+   res:=jsonb_build_object('winner',case when red<>black then case when red then -1 else 1 end else 0 end,'reason',case when red<>black then 'perpetual-check' else 'repetition' end);
+  end if;
+ end if;
+ return jsonb_build_object('kind',v_kind,'board',b,'turn',-s,'moves',list,'positions',pos,'result',res);
+end;$$;
+create or replace function public.board_undo(p_state jsonb,p_side integer) returns jsonb language plpgsql immutable set search_path=public as $$
+declare cut integer;next jsonb:=public.board_initial(p_state->>'kind'); b integer[];m jsonb;list jsonb;pos jsonb;
+begin
+ if p_state->'result'<>'null'::jsonb then raise exception 'Game ended.';end if;
+ select max(ordinality)::integer-1 into cut from jsonb_array_elements(p_state->'moves') with ordinality where (value->>'side')::integer=p_side;
+ if cut is null then raise exception 'Nothing to undo.';end if;
+ select coalesce(jsonb_agg(value order by ordinality),'[]') into list from jsonb_array_elements(p_state->'moves') with ordinality where ordinality<=cut;
+ select coalesce(jsonb_agg(value order by ordinality),'[]') into pos from jsonb_array_elements(p_state->'positions') with ordinality where ordinality<=cut+1;
+ select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(next->'board') with ordinality;
+ for m in select value from jsonb_array_elements(list) loop if (m->>'from')::integer>=0 then b[(m->>'from')::integer+1]:=0;end if;b[(m->>'to')::integer+1]:=(m->>'piece')::integer;end loop;
+ return jsonb_build_object('kind',p_state->>'kind','board',b,'turn',p_side,'moves',list,'positions',pos,'result',null);
+end;$$;
+create or replace function public.board_match_json(m public.board_matches) returns jsonb language sql stable set search_path=public as $$
+ select jsonb_build_object('id',m.id,'roomCode',m.room_code,'kind',m.kind,'round',m.round,'players',m.players,'state',m.state,'pending',m.pending,'events',m.events,'status',m.status,'createdAt',m.created_at,'endedAt',m.ended_at);
+$$;
+create or replace function public.board_members_json(r public.board_rooms) returns jsonb language sql stable set search_path=public as $$
+ select jsonb_build_array(jsonb_build_object('accountId',r.owner_id,'name',(select display_name from public.game_accounts where id=r.owner_id),'bot',false,'ready',r.host_ready,'seen',r.host_seen),
+ case when r.guest_id is not null then jsonb_build_object('accountId',r.guest_id,'name',(select display_name from public.game_accounts where id=r.guest_id),'bot',false,'ready',r.guest_ready,'seen',r.guest_seen)
+ when r.bot_level is not null then jsonb_build_object('accountId',null,'name','电脑','bot',true,'level',r.bot_level,'ready',true) else null end);
+$$;
+create or replace function public.board_room_json(r public.board_rooms,a uuid) returns jsonb language plpgsql set search_path=public as $$
+begin
+ if a<>r.owner_id and a is distinct from r.guest_id then return jsonb_build_object('isMember',false,'room',jsonb_build_object('code',r.code,'kind',r.kind,'title',r.title,'revision',r.revision,'joinable',r.guest_id is null and r.bot_level is null));end if;
+ return jsonb_build_object('isMember',true,'serverNow',clock_timestamp(),'room',jsonb_build_object('code',r.code,'kind',r.kind,'title',r.title,'revision',r.revision,'round',r.round,'hostSide',r.host_side,'ownerId',r.owner_id,'guestId',r.guest_id,'botLevel',r.bot_level,'hostReady',r.host_ready,'guestReady',r.guest_ready,'hostSeen',r.host_seen,'guestSeen',r.guest_seen,'matchId',r.match_id,'isHost',a=r.owner_id,'members',public.board_members_json(r)),
+ 'match',(select public.board_match_json(m) from public.board_matches m where id=r.match_id));
+end;$$;
+create or replace function public.board_create_room(p_kind text,p_title text,p_account_token text,p_bot_level text default null) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;c text;attempt integer:=0;
+begin
+ if p_kind is null or p_kind not in ('gomoku','xiangqi') or char_length(btrim(coalesce(p_title,''))) not between 1 and 60 then raise exception 'Invalid room.';end if;
+ if p_bot_level is not null and p_bot_level not in ('easy','normal','hard') then raise exception 'Invalid difficulty.';end if;
+ loop attempt:=attempt+1;c:=upper(substr(replace(gen_random_uuid()::text,'-',''),1,6));
+  begin insert into public.board_rooms(code,kind,title,owner_id,bot_level)values(c,p_kind,btrim(p_title),a,p_bot_level) returning * into r;exit;
+  exception when unique_violation then if attempt>=8 then raise;end if;end;
+ end loop;return public.board_room_json(r,a);
+end;$$;
+create or replace function public.board_get_room(p_room_code text,p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;
+begin
+ update public.board_rooms set host_seen=case when owner_id=a then clock_timestamp() else host_seen end,guest_seen=case when guest_id=a then clock_timestamp() else guest_seen end
+ where code=upper(btrim(p_room_code)) and (owner_id=a or guest_id=a);
+ select * into r from public.board_rooms where code=upper(btrim(p_room_code));if not found then raise exception 'Room not found.';end if;return public.board_room_json(r,a);
+end;$$;
+create or replace function public.board_get_match(p_match_id uuid,p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);m public.board_matches%rowtype;
+begin select * into m from public.board_matches where id=p_match_id and accounts @> array[a];if not found then raise exception 'Membership required.';end if;return public.board_match_json(m);end;$$;
+create or replace function public.board_records(p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);
+begin return jsonb_build_object('rooms',coalesce((select jsonb_agg(jsonb_build_object('code',code,'title',title,'kind',kind) order by updated_at desc)from public.board_rooms where owner_id=a or guest_id=a),'[]'),
+ 'matches',coalesce((select jsonb_agg(jsonb_build_object('id',id,'roomCode',room_code,'kind',kind,'round',round,'status',status,'result',state->'result','players',players,'createdAt',created_at)order by created_at desc)from public.board_matches where accounts @> array[a]),'[]'));end;$$;
+create or replace function public.board_action(p_room_code text,p_action text,p_data jsonb,p_revision integer,p_request_id uuid,p_account_token text)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;m public.board_matches%rowtype;
+ active boolean;actor jsonb;bot jsonb;who jsonb;evt jsonb;players jsonb;pending jsonb;last_seen timestamptz;before_count integer;accept boolean;
+begin
+ select * into r from public.board_rooms where code=upper(btrim(p_room_code)) for update;if not found then raise exception 'Room not found.';end if;
+ if p_action is null or (p_action<>'join' and a<>r.owner_id and a is distinct from r.guest_id) then raise exception 'Membership required.';end if;
+ if p_request_id is null then raise exception 'Request id required.';end if;
+ if exists(select 1 from public.board_requests where room_code=r.code and account_id=a and request_id=p_request_id) then return public.board_room_json(r,a);end if;
+ if p_revision is distinct from r.revision then raise exception 'Room changed.';end if;
+ select * into m from public.board_matches where id=r.match_id;active:=coalesce(m.status='active',false);
+ if p_action='join' then
+  if a<>r.owner_id and a is distinct from r.guest_id then
+   if r.guest_id is not null or r.bot_level is not null or active then raise exception 'Room full.';end if;
+   r.guest_id:=a;r.guest_ready:=false;r.guest_seen:=clock_timestamp();
+  end if;
+ elsif p_action='ready' then
+  if active then raise exception 'Game active.';end if;
+  if a=r.owner_id then r.host_ready:=coalesce((p_data->>'ready')::boolean,false);else r.guest_ready:=coalesce((p_data->>'ready')::boolean,false);end if;
+ elsif p_action='bot' then
+  if a<>r.owner_id then raise exception 'Only host.';end if;if active or r.guest_id is not null then raise exception 'Seat occupied.';end if;
+  if p_data->>'level' is not null and p_data->>'level' not in ('easy','normal','hard') then raise exception 'Invalid difficulty.';end if;
+  r.bot_level:=p_data->>'level';r.host_ready:=false;
+ elsif p_action='start' then
+  if a<>r.owner_id then raise exception 'Only host.';end if;
+  if active or not r.host_ready or (r.bot_level is null and (r.guest_id is null or not r.guest_ready)) then raise exception 'Players not ready.';end if;
+  r.host_side:=case when r.round>0 then -r.host_side when random()<0.5 then 1 else -1 end;r.round:=r.round+1;
+  select jsonb_agg(value||jsonb_build_object('side',case when ordinality=1 then r.host_side else -r.host_side end)order by ordinality)into players from jsonb_array_elements(public.board_members_json(r))with ordinality;
+  insert into public.board_matches(room_code,kind,round,accounts,players,state)values(r.code,r.kind,r.round,array_remove(array[r.owner_id,r.guest_id],null),players,public.board_initial(r.kind))returning * into m;
+  r.match_id:=m.id;r.host_ready:=false;r.guest_ready:=false;
+ else
+  if not active then raise exception 'Game ended.';end if;
+  select value into actor from jsonb_array_elements(m.players)where value->>'accountId'=a::text;
+  select value into bot from jsonb_array_elements(m.players)where (value->>'bot')::boolean;
+  if actor is null then raise exception 'Membership required.';end if;
+  evt:=jsonb_build_object('type',p_action,'actor',(actor->>'side')::integer,'at',clock_timestamp());
+  if p_action in ('move','bot_move') then
+   if m.pending is not null then raise exception 'Request pending.';end if;
+   who:=case when p_action='bot_move' then bot else actor end;
+   if who is null or (p_action='bot_move' and a<>r.owner_id) or who->>'side'<>m.state->>'turn' then raise exception 'Not your turn.';end if;
+   m.state:=public.board_play(m.state,p_data->'move');evt:=evt||jsonb_build_object('actor',(who->>'side')::integer,'move',m.state->'moves'->-1);
+  elsif p_action='resign' then m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',-(actor->>'side')::integer,'reason','resign'));
+  elsif p_action in ('undo','draw') then
+   if m.pending is not null then raise exception 'Request pending.';end if;
+   if p_action='undo' then perform public.board_undo(m.state,(actor->>'side')::integer);end if;
+   if bot is not null then
+    if p_action='undo' then before_count:=jsonb_array_length(m.state->'moves');m.state:=public.board_undo(m.state,(actor->>'side')::integer);evt:=evt||jsonb_build_object('count',before_count-jsonb_array_length(m.state->'moves'));
+    else m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',0,'reason','agreed'));end if;
+   else m.pending:=jsonb_build_object('type',p_action,'by',(actor->>'side')::integer);end if;
+  elsif p_action='reply' then
+   if m.pending is null or m.pending->>'by'=actor->>'side' then raise exception 'No request.';end if;
+   accept:=coalesce((p_data->>'accept')::boolean,false);evt:=evt||jsonb_build_object('request',m.pending,'accept',accept);
+   if accept then
+    if m.pending->>'type'='undo' then before_count:=jsonb_array_length(m.state->'moves');m.state:=public.board_undo(m.state,(m.pending->>'by')::integer);evt:=evt||jsonb_build_object('count',before_count-jsonb_array_length(m.state->'moves'));
+    else m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',0,'reason','agreed'));end if;
+   end if;m.pending:=null;
+  elsif p_action='cancel' then
+   if m.pending is null or m.pending->>'by'<>actor->>'side' then raise exception 'No request.';end if;m.pending:=null;
+  elsif p_action='interrupt' then
+   last_seen:=case when a=r.owner_id then r.guest_seen else r.host_seen end;
+   if bot is not null or last_seen is null or clock_timestamp()-last_seen<interval '5 minutes' then raise exception 'Opponent recently online.';end if;
+   m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',0,'reason','interrupted'));
+  else raise exception 'Invalid action.';end if;
+  if m.state->'result'<>'null'::jsonb then m.status:=case when m.state->'result'->>'reason'='interrupted' then 'interrupted' else 'finished' end;m.ended_at:=clock_timestamp();m.pending:=null;end if;
+  evt:=evt||jsonb_build_object('board',m.state->'board','turn',m.state->'turn','result',m.state->'result');m.events:=m.events||jsonb_build_array(evt);
+  update public.board_matches set state=m.state,pending=m.pending,events=m.events,status=m.status,ended_at=m.ended_at where id=m.id;
+ end if;
+ update public.board_rooms set guest_id=r.guest_id,bot_level=r.bot_level,host_ready=r.host_ready,guest_ready=r.guest_ready,host_side=r.host_side,round=r.round,match_id=r.match_id,
+  revision=revision+1,host_seen=case when a=owner_id then clock_timestamp() else host_seen end,guest_seen=case when a=r.guest_id then clock_timestamp() else r.guest_seen end,updated_at=clock_timestamp()where code=r.code returning * into r;
+ insert into public.board_requests(room_code,account_id,request_id)values(r.code,a,p_request_id);
+ return public.board_room_json(r,a);
+end;$$;
+-- Helpers are callable only by the owner; public clients use the authenticated RPC surface below.
+do $$ declare f record; begin for f in select oid::regprocedure as signature from pg_proc where pronamespace='public'::regnamespace and proname like 'board\_%' escape '\' loop
+ execute format('revoke execute on function %s from public,anon,authenticated',f.signature);end loop;end;$$;
+grant execute on function public.board_create_room(text,text,text,text),public.board_get_room(text,text),public.board_get_match(uuid,text),public.board_records(text),public.board_action(text,text,jsonb,integer,uuid,text) to anon,authenticated;
+
+
+-- International chess, independent authoritative validation.
+create or replace function public.board_chess_attack(b integer[],t integer,who integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare f integer;p integer;dx integer;dy integer;ax integer;ay integer;step integer;i integer;
+begin
+ for f in 0..63 loop if sign(b[f+1])<>who then continue;end if;p:=abs(b[f+1]);dx:=t%8-f%8;dy:=t/8-f/8;ax:=abs(dx);ay:=abs(dy);
+ if (p=1 and greatest(ax,ay)=1) or (p=5 and ax*ay=2) or (p=6 and ax=1 and dy=-who) then return true;end if;
+ if (p=2 and (ax=ay or dx=0 or dy=0)) or (p=3 and (dx=0 or dy=0)) or (p=4 and ax=ay) then
+  if dx=0 and dy=0 then continue;end if;step:=sign(dx)+sign(dy)*8;i:=f+step;while i<>t and b[i+1]=0 loop i:=i+step;end loop;if i=t then return true;end if;
+ end if;end loop;return false;
+end;$$;
+create or replace function public.board_chess_checked(s jsonb,who integer) returns boolean language plpgsql immutable set search_path=public as $$
+declare b integer[];k integer;
+begin select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;k:=array_position(b,who)-1;return k is null or public.board_chess_attack(b,k,-who);end;$$;
+create or replace function public.board_chess_apply(s jsonb,m jsonb) returns jsonb language plpgsql immutable set search_path=public as $$
+declare b integer[];f integer:=(m->>'from')::integer;t integer:=(m->>'to')::integer;p integer;who integer;captured integer;castle integer:=(s->>'castling')::integer;rf integer;rt integer;mask integer;ep integer:=-1;half integer;
+begin
+ select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;p:=b[f+1];who:=sign(p);captured:=b[t+1];b[f+1]:=0;b[t+1]:=coalesce((m->>'promote')::integer*who,p);
+ if abs(p)=6 and t=(s->>'ep')::integer and captured=0 and f%8<>t%8 then b[t+who*8+1]:=0;end if;
+ if abs(p)=1 and abs(t-f)=2 then rf:=f+case when t>f then 3 else -4 end;rt:=f+case when t>f then 1 else -1 end;b[rt+1]:=b[rf+1];b[rf+1]:=0;end if;
+ if abs(p)=1 then castle:=castle & case when who=1 then 12 else 3 end;end if;
+ mask:=case f when 0 then 8 when 7 then 4 when 56 then 2 when 63 then 1 else 0 end;castle:=castle & ~mask;
+ mask:=case t when 0 then 8 when 7 then 4 when 56 then 2 when 63 then 1 else 0 end;castle:=castle & ~mask;
+ if abs(p)=6 and abs(t-f)=16 then ep:=(f+t)/2;end if;
+ half:=case when abs(p)=6 or captured<>0 then 0 else (s->>'halfmove')::integer+1 end;
+ return s||jsonb_build_object('board',b,'turn',-who,'castling',castle,'ep',ep,'halfmove',half);
+end;$$;
+create or replace function public.board_chess_legal(s jsonb,m jsonb) returns boolean language plpgsql immutable set search_path=public as $$
+declare b integer[];f integer;t integer;p integer;who integer:=(s->>'turn')::integer;dx integer;dy integer;ax integer;ay integer;ok boolean:=false;promotes boolean;mask integer;rf integer;step integer;i integer;
+begin
+ if jsonb_typeof(m->'from') is distinct from 'number' or jsonb_typeof(m->'to') is distinct from 'number' then return false;end if;
+ f:=(m->>'from')::integer;t:=(m->>'to')::integer;if f<0 or f>63 or t<0 or t>63 or f=t then return false;end if;
+ select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;p:=abs(b[f+1]);
+ if sign(b[f+1])<>who or sign(b[t+1])=who or abs(b[t+1])=1 then return false;end if;
+ dx:=t%8-f%8;dy:=t/8-f/8;ax:=abs(dx);ay:=abs(dy);promotes:=p=6 and t/8=case when who=1 then 0 else 7 end;
+ if promotes then if coalesce(m->>'promote','') not in ('2','3','4','5') then return false;end if;
+ elsif m->>'promote' is not null then return false;end if;
+ if p=6 then
+  ok:=dx=0 and b[t+1]=0 and (dy=-who or (dy=-2*who and f/8=case when who=1 then 6 else 1 end and b[f-who*8+1]=0));
+  if ax=1 and dy=-who then ok:=b[t+1]<>0 or (t=(s->>'ep')::integer and b[t+1]=0 and b[t+who*8+1]=-who*6);end if;
+ elsif p=5 then ok:=ax*ay=2;
+ elsif p=1 then
+  ok:=greatest(ax,ay)=1;
+  if dy=0 and ax=2 and f=(case when who=1 then 60 else 4 end) then
+   mask:=case when who=1 then case when dx>0 then 1 else 2 end else case when dx>0 then 4 else 8 end end;rf:=f+case when dx>0 then 3 else -4 end;step:=sign(dx);
+   ok:=((s->>'castling')::integer & mask)<>0 and b[rf+1]=who*3 and not public.board_chess_checked(s,who);
+   i:=f+step;while i<>rf loop if b[i+1]<>0 then ok:=false;end if;i:=i+step;end loop;
+   if public.board_chess_attack(b,f+step,-who) or public.board_chess_attack(b,t,-who) then ok:=false;end if;
+  end if;
+ elsif (p=2 and (ax=ay or dx=0 or dy=0)) or (p=3 and (dx=0 or dy=0)) or (p=4 and ax=ay) then
+  ok:=true;step:=sign(dx)+sign(dy)*8;i:=f+step;while i<>t loop if b[i+1]<>0 then ok:=false;exit;end if;i:=i+step;end loop;
+ end if;
+ return coalesce(ok,false) and not public.board_chess_checked(public.board_chess_apply(s,m),who);
+end;$$;
+create or replace function public.board_chess_key(s jsonb) returns text language plpgsql immutable set search_path=public as $$
+declare ep integer:=-1;candidate integer:=(s->>'ep')::integer;who integer:=(s->>'turn')::integer;b text;
+begin
+ if candidate>=0 and (public.board_chess_legal(s,jsonb_build_object('from',candidate+who*8-1,'to',candidate)) or public.board_chess_legal(s,jsonb_build_object('from',candidate+who*8+1,'to',candidate))) then ep:=candidate;end if;
+ select string_agg(value,',' order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;
+ return b||':'||who||':'||(s->>'castling')||':'||ep;
+end;$$;
+create or replace function public.board_chess_initial() returns jsonb language plpgsql immutable set search_path=public as $$
+declare row_p integer[]:=array[3,5,4,2,1,4,5,3];b integer[]:=array_fill(0,array[64]);i integer;s jsonb;
+begin for i in 0..7 loop b[i+1]:=-row_p[i+1];b[i+9]:=-6;b[i+49]:=6;b[i+57]:=row_p[i+1];end loop;
+ s:=jsonb_build_object('kind','chess','board',b,'turn',1,'castling',15,'ep',-1,'halfmove',0,'moves','[]'::jsonb,'positions','[]'::jsonb,'result',null);
+ return jsonb_set(s,'{positions}',jsonb_build_array(public.board_chess_key(s)));end;$$;
+create or replace function public.board_chess_has_move(s jsonb) returns boolean language plpgsql immutable set search_path=public as $$
+declare f integer;t integer;m jsonb;
+begin for f in 0..63 loop if sign((s->'board'->>f)::integer)<>(s->>'turn')::integer then continue;end if;for t in 0..63 loop
+ m:=jsonb_build_object('from',f,'to',t);if abs((s->'board'->>f)::integer)=6 and t/8 in (0,7) then m:=m||jsonb_build_object('promote',2);end if;
+ if public.board_chess_legal(s,m) then return true;end if;end loop;end loop;return false;end;$$;
+create or replace function public.board_chess_play(s jsonb,m jsonb) returns jsonb language plpgsql immutable set search_path=public as $$
+declare n jsonb;entry jsonb;positions jsonb;f integer:=(m->>'from')::integer;t integer:=(m->>'to')::integer;who integer:=(s->>'turn')::integer;p integer;captured integer;res jsonb:='null';total integer;minor integer;bishops integer;colors integer;
+begin
+ if s->'result'<>'null'::jsonb or not public.board_chess_legal(s,m) then raise exception 'Illegal move.';end if;n:=public.board_chess_apply(s,m);p:=(s->'board'->>f)::integer;captured:=(s->'board'->>t)::integer;
+ if captured=0 and abs(p)=6 and t=(s->>'ep')::integer then captured:=-who*6;end if;
+ entry:=m||jsonb_build_object('side',who,'piece',p,'captured',captured,'before',jsonb_build_object('board',s->'board','turn',who,'castling',s->'castling','ep',s->'ep','halfmove',s->'halfmove'));
+ positions:=(s->'positions')||jsonb_build_array(public.board_chess_key(n));n:=n||jsonb_build_object('moves',(s->'moves')||jsonb_build_array(entry),'positions',positions);
+ select count(*),count(*) filter(where abs(value::integer) in (4,5)),count(*) filter(where abs(value::integer)=4),count(distinct ((ordinality-1)%8+(ordinality-1)/8)%2) into total,minor,bishops,colors
+ from jsonb_array_elements_text(n->'board') with ordinality where abs(value::integer)>1;
+ if not public.board_chess_has_move(n) then res:=jsonb_build_object('winner',case when public.board_chess_checked(n,-who) then who else 0 end,'reason',case when public.board_chess_checked(n,-who) then 'checkmate' else 'stalemate-draw' end);
+ elsif total=0 or (total=1 and minor=1) or (total=bishops and colors=1) then res:=jsonb_build_object('winner',0,'reason','insufficient');
+ elsif (select count(*) from jsonb_array_elements_text(positions) where value=public.board_chess_key(n))>=3 then res:=jsonb_build_object('winner',0,'reason','repetition');
+ elsif (n->>'halfmove')::integer>=100 then res:=jsonb_build_object('winner',0,'reason','fifty-moves');end if;
+ return jsonb_set(n,'{result}',res);
+end;$$;
+create or replace function public.board_expanded_undo(s jsonb,who integer) returns jsonb language plpgsql immutable set search_path=public as $$
+declare cut integer;list jsonb;positions jsonb;n jsonb;
+begin
+ if s->>'kind'='flight' then raise exception 'Undo not available.';end if;
+ if s->>'kind' not in ('chess','halma') then return public.board_undo(s,who);end if;
+ if s->'result'<>'null'::jsonb then raise exception 'Game ended.';end if;
+ select max(ordinality)::integer-1 into cut from jsonb_array_elements(s->'moves') with ordinality where (value->>'side')::integer=who;
+ if cut is null then raise exception 'Nothing to undo.';end if;
+ select coalesce(jsonb_agg(value order by ordinality),'[]') into list from jsonb_array_elements(s->'moves') with ordinality where ordinality<=cut;
+ n:=s||(s->'moves'->cut->'before')||jsonb_build_object('moves',list,'result',null);
+ if s->>'kind'='chess' then select coalesce(jsonb_agg(value order by ordinality),'[]') into positions from jsonb_array_elements(s->'positions') with ordinality where ordinality<=cut+1;n:=jsonb_set(n,'{positions}',positions);end if;return n;
+end;$$;
+
+create table if not exists public.board_halma_geometry (id integer primary key,q integer not null,r integer not null,camp integer not null,unique(q,r));
+insert into public.board_halma_geometry values (0,0,-4,-1),(1,1,-4,-1),(2,2,-4,-1),(3,3,-4,-1),(4,4,-4,-1),(5,-1,-3,-1),(6,0,-3,-1),(7,1,-3,-1),(8,2,-3,-1),(9,3,-3,-1),(10,4,-3,-1),(11,-2,-2,-1),(12,-1,-2,-1),(13,0,-2,-1),(14,1,-2,-1),(15,2,-2,-1),(16,3,-2,-1),(17,4,-2,-1),(18,-3,-1,-1),(19,-2,-1,-1),(20,-1,-1,-1),(21,0,-1,-1),(22,1,-1,-1),(23,2,-1,-1),(24,3,-1,-1),(25,4,-1,-1),(26,-4,0,-1),(27,-3,0,-1),(28,-2,0,-1),(29,-1,0,-1),(30,0,0,-1),(31,1,0,-1),(32,2,0,-1),(33,3,0,-1),(34,4,0,-1),(35,-4,1,-1),(36,-3,1,-1),(37,-2,1,-1),(38,-1,1,-1),(39,0,1,-1),(40,1,1,-1),(41,2,1,-1),(42,3,1,-1),(43,-4,2,-1),(44,-3,2,-1),(45,-2,2,-1),(46,-1,2,-1),(47,0,2,-1),(48,1,2,-1),(49,2,2,-1),(50,-4,3,-1),(51,-3,3,-1),(52,-2,3,-1),(53,-1,3,-1),(54,0,3,-1),(55,1,3,-1),(56,-4,4,-1),(57,-3,4,-1),(58,-2,4,-1),(59,-1,4,-1),(60,0,4,-1),(61,1,-5,0),(62,2,-5,0),(63,3,-5,0),(64,4,-5,0),(65,2,-6,0),(66,3,-6,0),(67,4,-6,0),(68,3,-7,0),(69,4,-7,0),(70,4,-8,0),(71,5,-4,1),(72,5,-3,1),(73,5,-2,1),(74,5,-1,1),(75,6,-4,1),(76,6,-3,1),(77,6,-2,1),(78,7,-4,1),(79,7,-3,1),(80,8,-4,1),(81,4,1,2),(82,3,2,2),(83,2,3,2),(84,1,4,2),(85,4,2,2),(86,3,3,2),(87,2,4,2),(88,4,3,2),(89,3,4,2),(90,4,4,2),(91,-1,5,3),(92,-2,5,3),(93,-3,5,3),(94,-4,5,3),(95,-2,6,3),(96,-3,6,3),(97,-4,6,3),(98,-3,7,3),(99,-4,7,3),(100,-4,8,3),(101,-5,4,4),(102,-5,3,4),(103,-5,2,4),(104,-5,1,4),(105,-6,4,4),(106,-6,3,4),(107,-6,2,4),(108,-7,4,4),(109,-7,3,4),(110,-8,4,4),(111,-4,-1,5),(112,-3,-2,5),(113,-2,-3,5),(114,-1,-4,5),(115,-4,-2,5),(116,-3,-3,5),(117,-2,-4,5),(118,-4,-3,5),(119,-3,-4,5),(120,-4,-4,5) on conflict(id) do nothing;
+alter table public.board_halma_geometry enable row level security;
+revoke all on public.board_halma_geometry from public,anon,authenticated;
+
+create or replace function public.board_halma_camps(n integer) returns integer[] language sql immutable set search_path=public as $$
+ select case n when 2 then array[0,3] when 3 then array[0,2,4] when 4 then array[0,1,3,4] when 6 then array[0,1,2,3,4,5] end;
+$$;
+create or replace function public.board_initial_game(kind text,n integer default 2,first_turn integer default 1) returns jsonb language plpgsql set search_path=public as $$
+declare b integer[];order_c integer[];c integer;i integer;
+begin
+ if kind in ('gomoku','xiangqi') then return public.board_initial(kind);end if;if kind='chess' then return public.board_chess_initial();end if;
+ if kind='halma' then order_c:=public.board_halma_camps(n);if order_c is null then raise exception 'Invalid seats.';end if;
+ select array_agg(coalesce(array_position(order_c,camp),0) order by id) into b from public.board_halma_geometry;
+ elsif kind='flight' and n between 2 and 4 then b:=array_fill(-1,array[n*4]);else raise exception 'Invalid game.';end if;
+ if first_turn<1 or first_turn>n then raise exception 'Invalid turn.';end if;
+ return jsonb_build_object('kind',kind,'count',n,'board',b,'turn',first_turn,'turnSerial',0,'rankings','[]'::jsonb,'dice',null,'moves','[]'::jsonb,'positions','[]'::jsonb,'result',null);
+end;$$;
+create or replace function public.board_race_next(s jsonb) returns jsonb language plpgsql immutable set search_path=public as $$
+declare i integer;who integer;n integer:=(s->>'count')::integer;
+begin for i in 1..n loop who:=((s->>'turn')::integer-1+i)%n+1;if not (s->'rankings') @> jsonb_build_array(who) then return s||jsonb_build_object('turn',who,'turnSerial',(s->>'turnSerial')::integer+1);end if;end loop;return s;end;$$;
+create or replace function public.board_race_finish(s jsonb) returns jsonb language plpgsql set search_path=public as $$
+declare who integer:=(s->>'turn')::integer;n integer:=(s->>'count')::integer;ranks jsonb:=s->'rankings';done boolean;dest integer;i integer;
+begin
+ if s->>'kind'='flight' then select bool_and((s->'board'->>g)::integer=57) into done from generate_series((who-1)*4,who*4-1) g;
+ else dest:=(public.board_halma_camps(n))[who];select bool_and((s->'board'->>id)::integer=who) into done from public.board_halma_geometry where camp=(dest+3)%6;end if;
+ if done and not ranks @> jsonb_build_array(who) then ranks:=ranks||jsonb_build_array(who);end if;
+ if jsonb_array_length(ranks)=n-1 then for i in 1..n loop if not ranks @> jsonb_build_array(i) then ranks:=ranks||jsonb_build_array(i);exit;end if;end loop;
+ s:=jsonb_set(s,'{result}',jsonb_build_object('winner',(ranks->>0)::integer,'reason','ranked'));end if;
+ return jsonb_set(s,'{rankings}',ranks);
+end;$$;
+create or replace function public.board_halma_legal(s jsonb,m jsonb) returns boolean language plpgsql set search_path=public as $$
+declare path integer[];b integer[];f integer;t integer;i integer;seen integer[];q1 integer;r1 integer;q2 integer;r2 integer;dx integer;dy integer;distance integer;mid integer;
+begin
+ if jsonb_typeof(m->'path') is distinct from 'array' then return false;end if;
+ select array_agg(value::integer order by ordinality) into path from jsonb_array_elements_text(m->'path') with ordinality;
+ if cardinality(path)<2 or cardinality(path)>121 or cardinality(path) is null then return false;end if;
+ if exists(select 1 from unnest(path) p where p<0 or p>120 or p is null) then return false;end if;
+ select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;f:=path[1];seen:=array[f];
+ if b[f+1]<>(s->>'turn')::integer then return false;end if;b[f+1]:=0;
+ for i in 2..cardinality(path) loop t:=path[i];if b[t+1]<>0 or t=any(seen) then return false;end if;
+ select q,r into q1,r1 from public.board_halma_geometry where id=f;select q,r into q2,r2 from public.board_halma_geometry where id=t;dx:=q2-q1;dy:=r2-r1;distance:=greatest(abs(dx),abs(dy),abs(dx+dy));
+ if distance=1 then if cardinality(path)<>2 then return false;end if;
+ elsif distance=2 and (dx=0 or dy=0 or dx=-dy) then select id into mid from public.board_halma_geometry where q=q1+dx/2 and r=r1+dy/2;if mid is null or b[mid+1]=0 then return false;end if;
+ else return false;end if;seen:=array_append(seen,t);f:=t;
+ end loop;return true;
+end;$$;
+create or replace function public.board_halma_has_move(s jsonb) returns boolean language plpgsql set search_path=public as $$
+declare f record;dx integer;dy integer;t integer;mid integer;
+begin
+ for f in select * from public.board_halma_geometry where (s->'board'->>id)::integer=(s->>'turn')::integer loop
+ for dx,dy in select * from(values(1,0),(-1,0),(0,1),(0,-1),(1,-1),(-1,1))d(x,y) loop
+ select id into t from public.board_halma_geometry where q=f.q+dx and r=f.r+dy;
+ if t is not null and (s->'board'->>t)::integer=0 then return true;end if;mid:=t;
+ select id into t from public.board_halma_geometry where q=f.q+dx*2 and r=f.r+dy*2;
+ if t is not null and mid is not null and (s->'board'->>mid)::integer<>0 and (s->'board'->>t)::integer=0 then return true;end if;
+ end loop;end loop;return false;
+end;$$;
+create or replace function public.board_flight_can_move(s jsonb) returns boolean language sql immutable set search_path=public as $$
+ select s->>'dice' is not null and exists(select 1 from generate_series(((s->>'turn')::integer-1)*4,(s->>'turn')::integer*4-1) i where (s->'board'->>i)::integer between 0 and 56 or ((s->'board'->>i)::integer=-1 and (s->>'dice')::integer=6));
+$$;
+create or replace function public.board_flight_roll(s jsonb,die integer) returns jsonb language plpgsql immutable set search_path=public as $$
+begin if s->>'kind'<>'flight' or s->'result'<>'null'::jsonb or s->>'dice' is not null or die not between 1 and 6 or die is null then raise exception 'Illegal roll.';end if;
+ s:=jsonb_set(s,'{dice}',to_jsonb(die));if not public.board_flight_can_move(s) then s:=public.board_race_next(jsonb_set(s,'{dice}','null'));end if;return s;end;$$;
+create or replace function public.board_race_play(s jsonb,m jsonb) returns jsonb language plpgsql set search_path=public as $$
+declare who integer:=(s->>'turn')::integer;b integer[];entry jsonb;f integer;t integer;i integer;token integer;die integer;stops integer[];captures integer[]:='{}';stop integer;global integer;side integer;p integer;before jsonb;
+begin
+ if s->'result'<>'null'::jsonb then raise exception 'Game ended.';end if;select array_agg(value::integer order by ordinality) into b from jsonb_array_elements_text(s->'board') with ordinality;
+ if s->>'kind'='halma' then
+  before:=jsonb_build_object('board',s->'board','turn',who,'rankings',s->'rankings','turnSerial',s->'turnSerial');
+  if m->'pass'='true'::jsonb then if public.board_halma_has_move(s) then raise exception 'Illegal move.';end if;entry:=jsonb_build_object('side',who,'pass',true,'before',before);
+  else if not public.board_halma_legal(s,m) then raise exception 'Illegal move.';end if;f:=(m->'path'->>0)::integer;t:=(m->'path'->>-1)::integer;b[f+1]:=0;b[t+1]:=who;entry:=jsonb_build_object('side',who,'from',f,'to',t,'path',m->'path','before',before);end if;
+  s:=public.board_race_finish(jsonb_set(s,'{board}',to_jsonb(b)));if s->'result'='null'::jsonb then s:=public.board_race_next(s);end if;
+ else
+  if jsonb_typeof(m->'token') is distinct from 'number' or s->>'dice' is null then raise exception 'Illegal move.';end if;token:=(m->>'token')::integer;if token<0 or token>3 then raise exception 'Illegal move.';end if;
+  die:=(s->>'dice')::integer;i:=(who-1)*4+token;f:=b[i+1];if f=57 or (f=-1 and die<>6) then raise exception 'Illegal move.';end if;
+  t:=case when f=-1 then 0 else f+die end;if t>57 then t:=114-t;end if;stops:=array[t];
+  if f<>-1 and t<52 then if t=18 then t:=30;stops:=array_append(stops,t);
+   elsif t%4=2 and t+4<52 then t:=t+4;stops:=array_append(stops,t);if t=18 then t:=30;stops:=array_append(stops,t);end if;end if;end if;
+  foreach stop in array stops loop if stop<52 then global:=((who-1)*13+stop)%52;
+   for i in 0..cardinality(b)-1 loop side:=i/4+1;p:=b[i+1];if side<>who and p between 0 and 51 and ((side-1)*13+p)%52=global then b[i+1]:=-1;captures:=array_append(captures,i);end if;end loop;
+  end if;end loop;
+  b[(who-1)*4+token+1]:=t;entry:=jsonb_build_object('side',who,'token',token,'from',f,'to',t,'dice',die,'stops',stops,'captures',captures);
+  s:=public.board_race_finish(s||jsonb_build_object('board',b,'dice',null));if s->'result'='null'::jsonb and (die<>6 or (s->'rankings') @> jsonb_build_array(who)) then s:=public.board_race_next(s);end if;
+ end if;
+ return jsonb_set(s,'{moves}',(s->'moves')||jsonb_build_array(entry));
+end;$$;
+create or replace function public.board_play_game(s jsonb,m jsonb) returns jsonb language plpgsql set search_path=public as $$
+begin case s->>'kind' when 'chess' then return public.board_chess_play(s,m);when 'flight','halma' then return public.board_race_play(s,m);else return public.board_play(s,m);end case;end;$$;
+
+-- Variable seat counts and room chat, preserving first-release room/match identifiers.
+alter table public.board_rooms drop constraint if exists board_rooms_kind_check;
+alter table public.board_rooms add constraint board_rooms_kind_check check(kind in ('gomoku','xiangqi','chess','flight','halma'));
+alter table public.board_rooms add column if not exists capacity integer not null default 2;
+alter table public.board_rooms add column if not exists takeover_level text not null default 'normal';
+alter table public.board_matches add column if not exists controls jsonb not null default '{}';
+-- First-release two-player requests did not store an explicit voting roster.
+update public.board_matches m set pending=m.pending||jsonb_build_object('required',(
+ select coalesce(jsonb_agg((p->>'side')::integer),'[]'::jsonb) from jsonb_array_elements(m.players) p
+ where p->>'accountId' is not null and p->>'side'<>m.pending->>'by'),'approved','[]'::jsonb)
+ where m.pending is not null and not(m.pending ? 'required');
+create table if not exists public.board_seats (
+ room_code text not null references public.board_rooms(code),seat integer not null check(seat between 0 and 5),account_id uuid references public.game_accounts(id),
+ bot_level text check(bot_level in ('easy','normal','hard')),ready boolean not null default false,last_seen timestamptz,
+ primary key(room_code,seat),check(account_id is null or bot_level is null)
+);
+create unique index if not exists board_seats_account_unique on public.board_seats(room_code,account_id) where account_id is not null;
+create index if not exists board_seats_account_idx on public.board_seats(account_id,room_code) where account_id is not null;
+insert into public.board_seats(room_code,seat,account_id,bot_level,ready,last_seen)
+ select code,0,owner_id,null,host_ready,host_seen from public.board_rooms on conflict do nothing;
+insert into public.board_seats(room_code,seat,account_id,bot_level,ready,last_seen)
+ select code,1,guest_id,bot_level,guest_ready,guest_seen from public.board_rooms on conflict do nothing;
+create table if not exists public.board_messages (
+ id bigint generated always as identity primary key,room_code text not null references public.board_rooms(code),account_id uuid not null references public.game_accounts(id),
+ author_name text not null,body text not null check(char_length(body) between 1 and 1000),created_at timestamptz not null default clock_timestamp(),request_id uuid not null,
+ unique(room_code,account_id,request_id)
+);
+create index if not exists board_messages_room_id_idx on public.board_messages(room_code,id desc);
+alter table public.board_seats enable row level security;alter table public.board_messages enable row level security;
+revoke all on public.board_seats,public.board_messages from public,anon,authenticated;
+revoke all on sequence public.board_messages_id_seq from public,anon,authenticated;
+create or replace function public.board_is_member(code text,a uuid) returns boolean language sql stable set search_path=public as $$select exists(select 1 from public.board_seats s where s.room_code=code and s.account_id=a);$$;
+create or replace function public.board_driver(code text) returns uuid language sql volatile set search_path=public as $$select account_id from public.board_seats where room_code=code and account_id is not null and last_seen>clock_timestamp()-interval '45 seconds' order by seat limit 1;$$;
+create or replace function public.board_members_json(r public.board_rooms) returns jsonb language sql stable set search_path=public as $$
+ select jsonb_agg(case when s.account_id is null and s.bot_level is null then null else jsonb_build_object('seat',s.seat,'accountId',s.account_id,'name',case when s.bot_level is not null then '电脑' else a.display_name end,'bot',s.bot_level is not null,'level',s.bot_level,'ready',s.bot_level is not null or s.ready,'seen',s.last_seen)end order by s.seat)
+ from public.board_seats s left join public.game_accounts a on a.id=s.account_id where s.room_code=r.code;
+$$;
+create or replace function public.board_match_json(m public.board_matches) returns jsonb language sql stable set search_path=public as $$
+ select jsonb_build_object('id',m.id,'roomCode',m.room_code,'kind',m.kind,'round',m.round,'players',m.players,'state',m.state,'controls',m.controls,'pending',m.pending,'events',m.events,'status',m.status,'createdAt',m.created_at,'endedAt',m.ended_at);
+$$;
+create or replace function public.board_room_json(r public.board_rooms,a uuid) returns jsonb language plpgsql set search_path=public as $$
+begin
+ if not public.board_is_member(r.code,a) then return jsonb_build_object('isMember',false,'room',jsonb_build_object('code',r.code,'kind',r.kind,'title',r.title,'revision',r.revision,'capacity',r.capacity,'joinable',exists(select 1 from public.board_seats where room_code=r.code and account_id is null and bot_level is null)));end if;
+ return jsonb_build_object('isMember',true,'serverNow',clock_timestamp(),'room',jsonb_build_object('code',r.code,'kind',r.kind,'title',r.title,'revision',r.revision,'round',r.round,'hostSide',r.host_side,'ownerId',r.owner_id,'guestId',r.guest_id,'botLevel',r.bot_level,'capacity',r.capacity,'takeoverLevel',r.takeover_level,'matchId',r.match_id,'isHost',a=r.owner_id,'driverId',public.board_driver(r.code),'members',public.board_members_json(r)),
+ 'match',(select public.board_match_json(m) from public.board_matches m where id=r.match_id));
+end;$$;
+drop function if exists public.board_create_room(text,text,text,text);
+create or replace function public.board_create_room(p_kind text,p_title text,p_account_token text,p_bot_level text default null,p_capacity integer default 2,p_takeover_level text default 'normal') returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;c text;i integer;attempt integer:=0;
+begin
+ if p_kind is null or p_kind not in ('gomoku','xiangqi','chess','flight','halma') or char_length(btrim(coalesce(p_title,''))) not between 1 and 60 then raise exception 'Invalid room.';end if;
+ if p_capacity is null or (case when p_kind='flight' then p_capacity not in (2,3,4) when p_kind='halma' then p_capacity not in (2,3,4,6) else p_capacity<>2 end) then raise exception 'Invalid seats.';end if;
+ if (p_bot_level is not null and p_bot_level not in ('easy','normal','hard')) or p_takeover_level is null or p_takeover_level not in ('easy','normal','hard') then raise exception 'Invalid difficulty.';end if;
+ loop attempt:=attempt+1;c:=upper(substr(replace(gen_random_uuid()::text,'-',''),1,6));begin insert into public.board_rooms(code,kind,title,owner_id,bot_level,capacity,takeover_level)values(c,p_kind,btrim(p_title),a,p_bot_level,p_capacity,p_takeover_level)returning * into r;exit;exception when unique_violation then if attempt>=8 then raise;end if;end;end loop;
+ for i in 0..p_capacity-1 loop insert into public.board_seats(room_code,seat,account_id,bot_level,last_seen)values(c,i,case when i=0 then a else null end,case when i=0 then null else p_bot_level end,case when i=0 then clock_timestamp() else null end);end loop;
+ return public.board_room_json(r,a);
+end;$$;
+create or replace function public.board_get_room(p_room_code text,p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;
+begin
+ update public.board_seats set last_seen=clock_timestamp()where room_code=upper(btrim(p_room_code)) and account_id=a;
+ select * into r from public.board_rooms where code=upper(btrim(p_room_code));if not found then raise exception 'Room not found.';end if;return public.board_room_json(r,a);
+end;$$;
+create or replace function public.board_records(p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);
+begin return jsonb_build_object('rooms',coalesce((select jsonb_agg(jsonb_build_object('code',r.code,'title',r.title,'kind',r.kind)order by r.updated_at desc)from public.board_rooms r where public.board_is_member(r.code,a)),'[]'),
+ 'matches',coalesce((select jsonb_agg(jsonb_build_object('id',id,'roomCode',room_code,'kind',kind,'round',round,'status',status,'result',state->'result','rankings',coalesce(state->'rankings','[]'),'players',players,'createdAt',created_at)order by created_at desc)from public.board_matches where accounts @> array[a]),'[]'));end;$$;
+create or replace function public.board_absent(m public.board_matches) returns boolean language sql volatile set search_path=public as $$
+ select exists(select 1 from jsonb_array_elements(m.players) p join public.board_seats s on s.account_id=(p->>'accountId')::uuid and s.room_code=m.room_code
+ where not coalesce(m.state->'rankings','[]'::jsonb) @> jsonb_build_array((p->>'side')::integer) and s.last_seen<=clock_timestamp()-interval '5 minutes');
+$$;
+create or replace function public.board_event(m public.board_matches,e jsonb) returns public.board_matches language plpgsql set search_path=public as $$
+begin m.events:=m.events||jsonb_build_array(e||jsonb_build_object('at',clock_timestamp(),'board',m.state->'board','turn',m.state->'turn','result',m.state->'result','state',m.state-'moves'-'positions'));return m;end;$$;
+create or replace function public.board_action(p_room_code text,p_action text,p_data jsonb,p_revision integer,p_request_id uuid,p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);r public.board_rooms%rowtype;m public.board_matches%rowtype;seat_no integer;actor jsonb;who integer;turn integer;turn_player jsonb;evt jsonb;before_count integer;before_serial integer;die integer;players jsonb;accounts uuid[];required jsonb;target integer;target_player jsonb;control jsonb;active boolean;is_race boolean;action text:=p_action;d jsonb:=coalesce(p_data,'{}');
+begin
+ select * into r from public.board_rooms where code=upper(btrim(p_room_code)) for update;if not found then raise exception 'Room not found.';end if;
+ if action is null or (action<>'join' and not public.board_is_member(r.code,a)) then raise exception 'Membership required.';end if;
+ if p_request_id is null then raise exception 'Request id required.';end if;
+ if exists(select 1 from public.board_requests where room_code=r.code and account_id=a and request_id=p_request_id) then return public.board_room_json(r,a);end if;
+ if p_revision is distinct from r.revision then raise exception 'Room changed.';end if;
+ select * into m from public.board_matches where id=r.match_id;active:=coalesce(m.status='active',false);is_race:=r.kind in ('flight','halma');
+ if action='join' then
+  if not public.board_is_member(r.code,a) then
+   select seat into seat_no from public.board_seats where room_code=r.code and account_id is null and bot_level is null order by seat limit 1;if seat_no is null or active then raise exception 'Room full.';end if;
+   update public.board_seats set account_id=a,ready=false,last_seen=clock_timestamp()where room_code=r.code and seat=seat_no;if seat_no=1 then r.guest_id:=a;end if;
+  end if;
+ elsif action='leave' then update public.board_seats set ready=false where room_code=r.code and account_id=a;
+ elsif action='ready' then
+  if active then raise exception 'Game active.';end if;update public.board_seats set ready=coalesce((d->>'ready')::boolean,false)where room_code=r.code and account_id=a;
+ elsif action in ('bot','takeover_level') then
+  if r.owner_id<>a then raise exception 'Only host.';end if;if active then raise exception 'Game active.';end if;
+  if action='takeover_level' then if r.kind<>'flight' or coalesce(d->>'level','') not in ('easy','normal','hard') then raise exception 'Invalid difficulty.';end if;r.takeover_level:=d->>'level';
+  else seat_no:=coalesce((d->>'seat')::integer,1);if seat_no<1 or seat_no>=r.capacity or exists(select 1 from public.board_seats where room_code=r.code and seat=seat_no and account_id is not null) then raise exception 'Seat occupied.';end if;
+   if d->>'level' is not null and d->>'level' not in ('easy','normal','hard') then raise exception 'Invalid difficulty.';end if;
+   update public.board_seats set bot_level=d->>'level',ready=false where room_code=r.code and seat=seat_no;if seat_no=1 then r.bot_level:=d->>'level';end if;
+  end if;update public.board_seats set ready=false where room_code=r.code and seat=0;
+ elsif action='start' then
+  if r.owner_id<>a then raise exception 'Only host.';end if;
+  if active or exists(select 1 from public.board_seats where room_code=r.code and bot_level is null and (account_id is null or not ready)) then raise exception 'Players not ready.';end if;
+  r.host_side:=case when is_race then case when r.round>0 then r.host_side%r.capacity+1 else floor(random()*r.capacity)::integer+1 end when r.round>0 then -r.host_side when random()<0.5 then 1 else -1 end;r.round:=r.round+1;
+  select jsonb_agg(value||jsonb_build_object('side',case when is_race then ordinality::integer when ordinality=1 then r.host_side else -r.host_side end)order by ordinality) into players from jsonb_array_elements(public.board_members_json(r))with ordinality;
+  select array_agg(account_id order by seat)filter(where account_id is not null) into accounts from public.board_seats where room_code=r.code;
+  insert into public.board_matches(room_code,kind,round,accounts,players,state)values(r.code,r.kind,r.round,accounts,players,public.board_initial_game(r.kind,r.capacity,case when is_race then r.host_side else 1 end))returning * into m;
+  r.match_id:=m.id;update public.board_seats set ready=false where room_code=r.code and account_id is not null;
+ else
+  if not active then raise exception 'Game ended.';end if;
+  select value into actor from jsonb_array_elements(m.players)where value->>'accountId'=a::text;if actor is null then raise exception 'Membership required.';end if;who:=(actor->>'side')::integer;
+  evt:=jsonb_build_object('type',action,'actor',who);
+  if m.pending is not null and action not in ('reply','cancel','resign','return') then raise exception 'Request pending.';end if;
+  if action in ('move','bot_move','roll','bot_roll') then
+   turn:=(m.state->>'turn')::integer;before_serial:=(m.state->>'turnSerial')::integer;select value into turn_player from jsonb_array_elements(m.players)where (value->>'side')::integer=turn;
+   if action in ('bot_move','bot_roll') then
+    if (not (turn_player->>'bot')::boolean and not m.controls ? turn::text) or public.board_driver(r.code) is distinct from a then raise exception 'Not your turn.';end if;
+   elsif turn<>who or (turn_player->>'bot')::boolean or m.controls ? turn::text then raise exception 'Not your turn.';end if;
+   evt:=evt||jsonb_build_object('actor',turn);
+   if action in ('roll','bot_roll') then die:=floor(random()*6)::integer+1;m.state:=public.board_flight_roll(m.state,die);evt:=evt||jsonb_build_object('dice',die,'skipped',m.state->>'dice' is null);
+   else m.state:=public.board_play_game(m.state,d->'move');evt:=evt||jsonb_build_object('move',m.state->'moves'->-1);end if;
+   m:=public.board_event(m,evt);
+   if coalesce((m.controls->turn::text->>'returnRequested')::boolean,false) and ((m.state->>'turn')::integer<>turn or (m.state->>'turnSerial')::integer is distinct from before_serial or m.state->'result'<>'null'::jsonb) then
+    m.controls:=m.controls-turn::text;m:=public.board_event(m,jsonb_build_object('type','returned','actor',turn));end if;
+  elsif action in ('takeover','return') then
+   if r.kind<>'flight' or coalesce(m.state->'rankings','[]') @> jsonb_build_array(who) then raise exception 'Invalid action.';end if;
+   if action='takeover' then
+    target:=coalesce((d->>'side')::integer,who);select value into target_player from jsonb_array_elements(m.players)where (value->>'side')::integer=target;
+    if target_player is null or (target_player->>'bot')::boolean or (m.state->'rankings') @> jsonb_build_array(target) or m.controls ? target::text then raise exception 'Invalid action.';end if;
+    if target<>who and exists(select 1 from public.board_seats where room_code=r.code and account_id=(target_player->>'accountId')::uuid and last_seen>clock_timestamp()-interval '5 minutes') then raise exception 'Opponent recently online.';end if;
+    m.controls:=m.controls||jsonb_build_object(target::text,jsonb_build_object('mode',case when target=who then 'manual' else 'offline' end,'level',r.takeover_level,'returnRequested',false));evt:=evt||jsonb_build_object('target',target);
+   else
+    if not m.controls ? who::text then raise exception 'Invalid action.';end if;
+    if (m.state->>'turn')::integer=who then m.controls:=jsonb_set(m.controls,array[who::text,'returnRequested'],'true');else m.controls:=m.controls-who::text;end if;
+    evt:=evt||jsonb_build_object('waiting',m.controls ? who::text);
+   end if;m:=public.board_event(m,evt);
+  elsif action='resign' then if is_race then raise exception 'Invalid action.';end if;m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',-who,'reason','resign'));m:=public.board_event(m,evt);
+  elsif action in ('undo','draw','interrupt') then
+   if coalesce(m.state->'rankings','[]') @> jsonb_build_array(who) then raise exception 'Invalid action.';end if;
+   if action='undo' then perform public.board_expanded_undo(m.state,who);end if;if action='draw' and is_race then raise exception 'Invalid action.';end if;
+   if action='interrupt' and not public.board_absent(m) then raise exception 'Opponent recently online.';end if;
+   select coalesce(jsonb_agg((p->>'side')::integer),'[]') into required from jsonb_array_elements(m.players)p join public.board_seats ss on ss.room_code=r.code and ss.account_id=(p->>'accountId')::uuid
+   where (p->>'side')::integer<>who and (action<>'interrupt' or (not coalesce(m.state->'rankings','[]') @> jsonb_build_array((p->>'side')::integer) and ss.last_seen>clock_timestamp()-interval '45 seconds'));
+   if jsonb_array_length(required)>0 then m.pending:=jsonb_build_object('id',p_request_id,'type',action,'by',who,'required',required,'approved','[]'::jsonb);
+   elsif action='undo' then before_count:=jsonb_array_length(m.state->'moves');m.state:=public.board_expanded_undo(m.state,who);evt:=evt||jsonb_build_object('count',before_count-jsonb_array_length(m.state->'moves'));
+   else m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',0,'reason',case when action='draw' then 'agreed' else 'interrupted' end));end if;m:=public.board_event(m,evt);
+  elsif action='reply' then
+   if m.pending is null or (m.pending->>'by')::integer=who then raise exception 'No request.';end if;evt:=evt||jsonb_build_object('request',m.pending,'accept',coalesce((d->>'accept')::boolean,false));
+   if not coalesce((d->>'accept')::boolean,false) then m.pending:=null;
+   else
+    if not (m.pending->'required') @> jsonb_build_array(who) or (m.pending->'approved') @> jsonb_build_array(who) then raise exception 'No request.';end if;
+    m.pending:=jsonb_set(m.pending,'{approved}',(m.pending->'approved')||jsonb_build_array(who));
+    if m.pending->>'type'='interrupt' and not public.board_absent(m) then m.pending:=null;evt:=evt||jsonb_build_object('cancelled',true);
+    elsif (m.pending->'approved') @> (m.pending->'required') then
+     if m.pending->>'type'='undo' then before_count:=jsonb_array_length(m.state->'moves');m.state:=public.board_expanded_undo(m.state,(m.pending->>'by')::integer);evt:=evt||jsonb_build_object('count',before_count-jsonb_array_length(m.state->'moves'));
+     else m.state:=jsonb_set(m.state,'{result}',jsonb_build_object('winner',0,'reason',case when m.pending->>'type'='draw' then 'agreed' else 'interrupted' end));end if;m.pending:=null;
+    end if;
+   end if;m:=public.board_event(m,evt);
+  elsif action='cancel' then if m.pending is null or (m.pending->>'by')::integer<>who then raise exception 'No request.';end if;m.pending:=null;m:=public.board_event(m,evt);
+  else raise exception 'Invalid action.';end if;
+  if m.state->'result'<>'null'::jsonb then m.status:=case when m.state->'result'->>'reason'='interrupted' then 'interrupted' else 'finished' end;m.ended_at:=clock_timestamp();m.pending:=null;end if;
+  update public.board_matches set state=m.state,controls=m.controls,pending=m.pending,events=m.events,status=m.status,ended_at=m.ended_at where id=m.id;
+ end if;
+ update public.board_seats set last_seen=clock_timestamp()where room_code=r.code and account_id=a;
+ update public.board_rooms set guest_id=r.guest_id,bot_level=r.bot_level,host_side=r.host_side,round=r.round,match_id=r.match_id,takeover_level=r.takeover_level,revision=revision+1,updated_at=clock_timestamp()where code=r.code returning * into r;
+ insert into public.board_requests(room_code,account_id,request_id)values(r.code,a,p_request_id);return public.board_room_json(r,a);
+end;$$;
+create or replace function public.board_chat_json(m public.board_messages) returns jsonb language sql stable set search_path=public as $$select jsonb_build_object('id',m.id,'accountId',m.account_id,'name',m.author_name,'text',m.body,'createdAt',m.created_at,'requestId',m.request_id);$$;
+create or replace function public.board_chat_list(p_room_code text,p_account_token text,p_before_id bigint default null,p_after_id bigint default null) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);code text:=upper(btrim(p_room_code));items jsonb;
+begin if not public.board_is_member(code,a) then raise exception 'Membership required.';end if;
+ if p_after_id is not null then select coalesce(jsonb_agg(public.board_chat_json(m)order by m.id),'[]') into items from(select * from public.board_messages where room_code=code and id>p_after_id order by id limit 50)m;
+ else select coalesce(jsonb_agg(public.board_chat_json(m)order by m.id),'[]') into items from(select * from public.board_messages where room_code=code and (p_before_id is null or id<p_before_id)order by id desc limit 50)m;end if;return items;
+end;$$;
+create or replace function public.board_chat_send(p_room_code text,p_text text,p_request_id uuid,p_account_token text) returns jsonb language plpgsql security definer set search_path=public as $$
+declare a uuid:=public.game_account_id_from_token(p_account_token);code text:=upper(btrim(p_room_code));m public.board_messages%rowtype;
+begin if not public.board_is_member(code,a) then raise exception 'Membership required.';end if;
+ if p_request_id is null then raise exception 'Request id required.';end if;select * into m from public.board_messages where room_code=code and account_id=a and request_id=p_request_id;if found then return public.board_chat_json(m);end if;
+ if char_length(btrim(coalesce(p_text,''))) not between 1 and 1000 then raise exception 'Invalid message.';end if;
+ insert into public.board_messages(room_code,account_id,author_name,body,request_id)select code,a,display_name,btrim(p_text),p_request_id from public.game_accounts where id=a
+ on conflict(room_code,account_id,request_id)do update set request_id=excluded.request_id returning * into m;return public.board_chat_json(m);
+end;$$;
+do $$ declare f record;begin for f in select oid::regprocedure as signature from pg_proc where pronamespace='public'::regnamespace and proname like 'board\_%' escape '\' loop execute format('revoke execute on function %s from public,anon,authenticated',f.signature);end loop;end;$$;
+grant execute on function public.board_create_room(text,text,text,text,integer,text),public.board_get_room(text,text),public.board_get_match(uuid,text),public.board_records(text),public.board_action(text,text,jsonb,integer,uuid,text),public.board_chat_list(text,text,bigint,bigint),public.board_chat_send(text,text,uuid,text) to anon,authenticated;
+
+commit;

@@ -3,7 +3,10 @@
   var IDENTITY_KEY = "hundred-qas-current-players-v1";
   var TYCOON_STORAGE_KEY = "friends-tycoon-state-v1";
   var TYCOON_IDENTITY_KEY = "friends-tycoon-current-players-v1";
-  var AUTH_SESSION_KEY = "friends-games-auth-session-v1";
+  var AUTH_SESSION_KEY = isSupabaseMode() ? "friends-games-auth-session-v1" : "friends-games-local-auth-session-v1";
+  var authRefreshPromise = null;
+  var authLastRefresh = 0;
+  var renderSequence = 0;
   var PAGE_SIZE = 5;
   var QUESTION_TARGET = 100;
   var QUESTION_MINIMUM = 1;
@@ -36,7 +39,13 @@
     rawText: "",
     questions: defaultQuestions.slice()
   };
+  var accountUI = window.createAccountModule({ rpc: supabaseRpc, shell: renderShell, escape: escapeHtml, toast: showToast,
+    route: setRoute, account: getAuthUser, token: getAccountToken, save: saveAuthSession, clear: clearAuthSession,
+    afterLogin: returnAfterLogin, local: function () { return !isSupabaseMode(); } });
+  var spin = window.createSpinModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
+  var boardGames = window.createBoardModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
   var games = [
+    { id: "board", title: "Board Games", description: "五子棋、中国象棋、国际象棋、飞行棋和跳棋，与朋友或电脑对弈，边玩边聊，逐步回看每一局。", action: "open-board", cta: "进入棋类大厅", meta: "好友与电脑对战" },
     {
       id: "qa",
       title: "100 Q&As",
@@ -51,8 +60,9 @@
       description: "文字版线上大富翁，开房间后轮流掷骰、买地、聊天。",
       action: "open-tycoon",
       cta: "进入 Friends Tycoon",
-      meta: "开发中"
-    }
+      meta: "已上线"
+    },
+    { id: "spin", title: "What’s Next?", description: "今天吃什么，见面玩什么？把选择交给转盘，和朋友一起揭晓。", action: "open-spin", cta: "进入 What’s Next?", meta: "随机决定" }
   ];
   var tycoonMap = [
     { name: "起点", type: "start" },
@@ -124,10 +134,7 @@
         clearAuthSession();
         return null;
       }
-      if (isAuthSessionExpired(session)) {
-        clearAuthSession();
-        return null;
-      }
+
       return session;
     } catch (error) {
       return null;
@@ -153,7 +160,8 @@
       expiresAt: rawSession.expiresAt || rawSession.expires_at || null,
       account: {
         id: account.id,
-        username: account.username || account.displayName || account.email || "我的账号"
+        username: account.username || "",
+        displayName: account.displayName || "玩家"
       }
     };
   }
@@ -188,16 +196,43 @@
   function accountLabel() {
     var user = getAuthUser();
     if (!user) return "登录";
-    return user.username || "我的账号";
-  }
-
-  function normalizeUsername(value) {
-    return String(value || "").trim();
+    return user.displayName || "玩家";
   }
 
   async function ensureFreshAuthSession() {
-    if (!isSupabaseMode()) return;
-    loadAuthSession();
+    var session = loadAuthSession();
+    if (!session || Date.now() - authLastRefresh < 60000) return;
+    if (!authRefreshPromise) {
+      var token = session.token;
+      authRefreshPromise = supabaseRpc("account_refresh", { p_account_token: token }).then(function (next) {
+        if (getAccountToken() === token) { saveAuthSession(next); authLastRefresh = Date.now(); }
+      }).catch(function (error) {
+        if (/Login required/i.test(error.message) && getAccountToken() === token) clearAuthSession();
+        // Keep the local session on network failure; protected RPCs remain authoritative.
+      }).finally(function () { authRefreshPromise = null; });
+    }
+    await authRefreshPromise;
+  }
+
+  function requireLogin() {
+    if (isLoggedIn()) return true;
+    var target = window.location.hash.slice(1);
+    if (/^(qa|room|create|tycoon|spin|board)(\/|$)/.test(target)) sessionStorage.setItem('friends-games-return-to', target);
+    setRoute('account');
+    return false;
+  }
+
+  function returnAfterLogin() {
+    var target = sessionStorage.getItem('friends-games-return-to');
+    sessionStorage.removeItem('friends-games-return-to');
+    authLastRefresh = Date.now();
+    if (target && /^(qa|room|create|tycoon|spin|board)(\/|$)/.test(target)) setRoute(target);
+    else render();
+  }
+
+  function stateStorageKey(key) {
+    var account = getAuthUser();
+    return isSupabaseMode() && account ? key + ':account:' + account.id : key;
   }
 
   function supabaseHeaders() {
@@ -216,6 +251,17 @@
   }
 
   async function supabaseRpc(name, payload) {
+    var requestToken = payload && payload.p_account_token;
+    if (!isSupabaseMode()) {
+      try {
+        var localResult = await window.LocalGames.rpc(name, payload || {});
+        if (requestToken && requestToken !== getAccountToken()) throw new Error('Account changed.');
+        return localResult;
+      } catch (error) {
+        if (/Login required/i.test(error.message) && requestToken === getAccountToken()) { clearAuthSession(); requireLogin(); }
+        throw error;
+      }
+    }
     var config = getConfig();
     var baseUrl = String(config.supabaseUrl || "").replace(/\/$/, "");
     var response = await fetch(baseUrl + "/rest/v1/rpc/" + name, {
@@ -226,29 +272,45 @@
 
     if (!response.ok) {
       var message = await response.text();
+      if (/Login required/i.test(message) && requestToken === getAccountToken()) {
+        clearAuthSession(); requireLogin();
+      }
       throw new Error(message || "Supabase request failed.");
     }
 
     if (response.status === 204) return null;
-    return response.json();
+    var result = await response.json();
+    if (requestToken && requestToken !== getAccountToken()) throw new Error("Account changed.");
+    return result;
+  }
+
+  function resolveLocalNames(state) {
+    if (isSupabaseMode()) return state;
+    var names = window.LocalGames.displayNames();
+    Object.values(state.rooms || {}).forEach(function (room) {
+      Object.values(room.players || {}).forEach(function (player) {
+        if (names[player.accountId]) player.nickname = names[player.accountId];
+      });
+    });
+    return state;
   }
 
   function loadState() {
     try {
-      var saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : { rooms: {} };
+      var saved = localStorage.getItem(stateStorageKey(STORAGE_KEY));
+      return resolveLocalNames(saved ? JSON.parse(saved) : { rooms: {} });
     } catch (error) {
       return { rooms: {} };
     }
   }
 
   function saveState(state) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(stateStorageKey(STORAGE_KEY), JSON.stringify(state));
   }
 
   function loadIdentities() {
     try {
-      var saved = localStorage.getItem(IDENTITY_KEY);
+      var saved = localStorage.getItem(stateStorageKey(IDENTITY_KEY));
       return saved ? JSON.parse(saved) : {};
     } catch (error) {
       return {};
@@ -256,25 +318,25 @@
   }
 
   function saveIdentities(identities) {
-    localStorage.setItem(IDENTITY_KEY, JSON.stringify(identities));
+    localStorage.setItem(stateStorageKey(IDENTITY_KEY), JSON.stringify(identities));
   }
 
   function loadTycoonState() {
     try {
-      var saved = localStorage.getItem(TYCOON_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : { rooms: {} };
+      var saved = localStorage.getItem(stateStorageKey(TYCOON_STORAGE_KEY));
+      return resolveLocalNames(saved ? JSON.parse(saved) : { rooms: {} });
     } catch (error) {
       return { rooms: {} };
     }
   }
 
   function saveTycoonState(state) {
-    localStorage.setItem(TYCOON_STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(stateStorageKey(TYCOON_STORAGE_KEY), JSON.stringify(state));
   }
 
   function loadTycoonIdentities() {
     try {
-      var saved = localStorage.getItem(TYCOON_IDENTITY_KEY);
+      var saved = localStorage.getItem(stateStorageKey(TYCOON_IDENTITY_KEY));
       return saved ? JSON.parse(saved) : {};
     } catch (error) {
       return {};
@@ -282,7 +344,7 @@
   }
 
   function saveTycoonIdentities(identities) {
-    localStorage.setItem(TYCOON_IDENTITY_KEY, JSON.stringify(identities));
+    localStorage.setItem(stateStorageKey(TYCOON_IDENTITY_KEY), JSON.stringify(identities));
   }
 
   function getTycoonIdentity(roomOrCode) {
@@ -532,10 +594,7 @@
     if (activeGame === "tycoon" && getHashParts()[1] === "room") {
       app.className += " app-shell-tycoon-room";
     }
-    app.innerHTML = [
-      renderGlobalNav(activeGame),
-      content
-    ].join("");
+    app.innerHTML = [renderGlobalNav(activeGame), content].join("");
   }
 
   function renderGlobalNav(activeGame) {
@@ -546,6 +605,8 @@
       '    <button class="' + (activeGame === "lobby" ? "is-active" : "") + '" data-action="open-lobby" type="button">游戏大厅</button>',
       '    <button class="' + (activeGame === "qa" ? "is-active" : "") + '" data-action="open-qa" type="button">100 Q&As</button>',
       '    <button class="' + (activeGame === "tycoon" ? "is-active" : "") + '" data-action="open-tycoon" type="button">Friends Tycoon</button>',
+      '    <button class="' + (activeGame === "spin" ? "is-active" : "") + '" data-action="open-spin" type="button">What’s Next?</button>',
+      '    <button class="' + (activeGame === "board" ? "is-active" : "") + '" data-action="open-board" type="button">Board Games</button>',
       '    <button class="' + (activeGame === "account" ? "is-active" : "") + '" data-action="open-account" type="button">' + escapeHtml(isLoggedIn() ? "我的记录" : "登录") + '</button>',
       '  </nav>',
       '</header>'
@@ -563,10 +624,12 @@
   }
 
   function getCurrentPlayer(room) {
+    var account = getAuthUser();
+    if (!account) return null;
+    if (!isSupabaseMode()) return getRoomPlayers(room).find(function (p) { return p.accountId === account.id; }) || null;
     var identity = getIdentity(room);
     var playerId = getIdentityPlayerId(identity);
-    if (!playerId || !room.players[playerId]) return null;
-    return room.players[playerId];
+    return playerId && room.players[playerId] ? room.players[playerId] : null;
   }
 
   function answeredCount(player, room) {
@@ -619,6 +682,7 @@
       room.players[player.id] = {
         id: player.id,
         nickname: player.nickname,
+        submittedName: player.submittedName || null,
         createdAt: player.createdAt || player.created_at || new Date().toISOString(),
         submittedAt: player.submittedAt || player.submitted_at || null,
         lastPage: 0,
@@ -675,10 +739,11 @@
   }
 
   function getTycoonCurrentPlayer(room) {
-    var identity = getTycoonIdentity(room);
-    var playerId = getTycoonIdentityPlayerId(identity);
-    if (!playerId || !room.players[playerId]) return null;
-    return room.players[playerId];
+    var account = getAuthUser();
+    if (!account) return null;
+    if (!isSupabaseMode()) return getTycoonPlayers(room).find(function (p) { return p.accountId === account.id; }) || null;
+    var playerId = getTycoonIdentityPlayerId(getTycoonIdentity(room));
+    return playerId && room.players[playerId] ? room.players[playerId] : null;
   }
 
   function isTycoonHost(room, player) {
@@ -1123,6 +1188,7 @@
       });
     }
 
+    if (!bundle.currentPlayerId) saveIdentity(room, null);
     return cacheRoom(room);
   }
 
@@ -1146,6 +1212,7 @@
       });
     }
 
+    if (!bundle.currentPlayerId) saveTycoonIdentity(room, null);
     return cacheTycoonRoom(room);
   }
 
@@ -1309,24 +1376,37 @@
 
   async function render(options) {
     options = options || {};
+    var sequence = ++renderSequence;
+    spin.stop();
+    boardGames.stop();
     await ensureFreshAuthSession();
+    if (sequence !== renderSequence) return;
     var state = loadState();
     var parts = getHashParts();
     var pageName = parts[0] || "home";
+    if (pageName !== "account") accountUI.leave();
 
     if (!(pageName === "tycoon" && parts[1] === "room")) {
       tycoonOpenCellIndex = null;
       setTycoonPolling("");
     }
 
+    if (/^(qa|room|create|tycoon|spin|board)$/.test(pageName) && !requireLogin()) {
+      await renderAccountPage(); return;
+    }
+    if (pageName === "board") { await boardGames.render(parts[1], parts[2]); return; }
+    if (pageName === "spin") { await spin.render(parts[1] === 'room' ? parts[2] : null); return; }
     if (pageName === "qa") {
       if (parts[1] === "export") {
         if (isSupabaseMode() && !options.skipOnlineSync) {
           try {
             await syncOnlineRoom(parts[2]);
+            if (sequence !== renderSequence) return;
             state = loadState();
           } catch (error) {
-            showToast("线上房间同步失败，请检查 Supabase 配置。");
+            if (sequence !== renderSequence || !isLoggedIn()) return;
+            showToast("房间暂时无法读取，请检查网络后重试。");
+            renderShell('<main class="narrow-layout panel"><p>房间暂时无法读取。</p><button data-action="retry-room" class="primary-button">重试</button></main>', "qa"); return;
           }
         }
         renderQaExportPage(state, parts[2]);
@@ -1337,9 +1417,12 @@
         if (isSupabaseMode() && !options.skipOnlineSync) {
           try {
             await syncOnlineRoom(parts[2]);
+            if (sequence !== renderSequence) return;
             state = loadState();
           } catch (error) {
-            showToast("线上房间同步失败，请检查 Supabase 配置。");
+            if (sequence !== renderSequence || !isLoggedIn()) return;
+            showToast("房间暂时无法读取，请检查网络后重试。");
+            renderShell('<main class="narrow-layout panel"><p>房间暂时无法读取。</p><button data-action="retry-room" class="primary-button">重试</button></main>', "qa"); return;
           }
         }
         renderRoom(state, parts[2]);
@@ -1364,9 +1447,12 @@
       if (isSupabaseMode() && !options.skipOnlineSync) {
         try {
           await syncOnlineRoom(parts[1]);
+          if (sequence !== renderSequence) return;
           state = loadState();
         } catch (error) {
-          showToast("线上房间同步失败，请检查 Supabase 配置。");
+          if (sequence !== renderSequence || !isLoggedIn()) return;
+          showToast("房间暂时无法读取，请检查网络后重试。");
+          renderShell('<main class="narrow-layout panel"><p>房间暂时无法读取。</p><button data-action="retry-room" class="primary-button">重试</button></main>', "qa"); return;
         }
       }
       renderRoom(state, parts[1]);
@@ -1384,9 +1470,12 @@
         if (isSupabaseMode() && !options.skipOnlineSync) {
           try {
             await syncOnlineTycoonRoom(parts[2]);
+            if (sequence !== renderSequence) return;
             tycoonState = loadTycoonState();
           } catch (error) {
+            if (sequence !== renderSequence || !isLoggedIn()) return;
             showToast(onlineTycoonErrorMessage());
+            renderShell('<main class="narrow-layout panel"><p>房间暂时无法读取。</p><button data-action="retry-room" class="primary-button">重试</button></main>', "tycoon"); return;
           }
         }
         renderTycoonRoom(tycoonState, parts[2]);
@@ -1431,24 +1520,24 @@
     var qaState = loadState();
     var tycoonState = loadTycoonState();
     return {
-      qa: Object.keys(qaState.rooms || {}).map(function (id) {
+      qa: Object.keys(qaState.rooms || {}).filter(function (id) { return Boolean(getCurrentPlayer(qaState.rooms[id])) || qaState.rooms[id].ownerAccountId === getAuthUser().id; }).map(function (id) {
         var room = qaState.rooms[id];
-        var player = getCurrentPlayer(room) || getRoomPlayers(room)[0] || null;
+        var player = getCurrentPlayer(room);
         return {
           roomCode: room.code,
-          nickname: player ? player.nickname : "本地玩家",
+          nickname: player ? player.nickname : "房主（尚未答题）",
           questionCount: getRoomQuestions(room).length,
           submittedAt: player ? player.submittedAt : null,
           answerCount: player ? answeredCount(player, room) : 0,
           createdAt: room.createdAt
         };
       }),
-      tycoon: Object.keys(tycoonState.rooms || {}).map(function (id) {
+      tycoon: Object.keys(tycoonState.rooms || {}).filter(function (id) { return Boolean(getTycoonCurrentPlayer(tycoonState.rooms[id])); }).map(function (id) {
         var room = normalizeTycoonRoom(tycoonState.rooms[id]);
         var player = getTycoonCurrentPlayer(room) || getTycoonPlayers(room)[0] || null;
         return {
           roomCode: room.code,
-          nickname: player ? player.nickname : "本地玩家",
+          nickname: player ? player.nickname : "房主（尚未答题）",
           status: room.status,
           playerStatus: player ? player.status : "",
           cash: player ? player.cash : 0,
@@ -1460,12 +1549,13 @@
   }
 
   function collectDeviceBindingPayload() {
-    var qaState = loadState();
+    var qaState = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"rooms":{}}');
     var qaPlayers = [];
     var seenQa = {};
     Object.keys(qaState.rooms || {}).forEach(function (id) {
       var room = qaState.rooms[id];
-      var identity = getIdentity(room);
+      var identities = JSON.parse(localStorage.getItem(IDENTITY_KEY) || "{}");
+      var identity = identities[room.id] || identities[room.code];
       var playerId = getIdentityPlayerId(identity);
       if (!identity || !identity.playerKey || !playerId) return;
       var key = room.code + ":" + playerId;
@@ -1478,12 +1568,13 @@
       });
     });
 
-    var tycoonState = loadTycoonState();
+    var tycoonState = JSON.parse(localStorage.getItem(TYCOON_STORAGE_KEY) || '{"rooms":{}}');
     var tycoonPlayers = [];
     var seenTycoon = {};
     Object.keys(tycoonState.rooms || {}).forEach(function (id) {
       var room = tycoonState.rooms[id];
-      var identity = getTycoonIdentity(room);
+      var identities = JSON.parse(localStorage.getItem(TYCOON_IDENTITY_KEY) || "{}");
+      var identity = identities[room.id] || identities[room.code];
       var playerId = getTycoonIdentityPlayerId(identity);
       if (!identity || !identity.playerKey || !playerId) return;
       var key = room.code + ":" + playerId;
@@ -1503,52 +1594,24 @@
   }
 
   async function loadAccountRecords() {
-    if (!isSupabaseMode() || !isLoggedIn()) return localAccountRecords();
+    if (!isLoggedIn()) return { qa: [], tycoon: [], spin: [] };
+    if (!isSupabaseMode()) {
+      var records = localAccountRecords();
+      records.spin = await supabaseRpc('spin_records', withAccountToken({}));
+      records.board = await supabaseRpc('board_records', withAccountToken({}));
+      return records;
+    }
     accountRecordsCache = await supabaseRpc("account_get_records", withAccountToken({}));
+    accountRecordsCache.board = await supabaseRpc("board_records", withAccountToken({}));
     return accountRecordsCache || { qa: [], tycoon: [] };
   }
 
   async function renderAccountPage() {
     document.title = "我的记录 | Friends Games";
 
-    if (!isSupabaseMode()) {
-      renderShell([
-        '<main class="account-layout">',
-        '  <section class="panel account-panel">',
-        '    <p class="eyebrow">Account</p>',
-        '    <h1>本地模式记录</h1>',
-        '    <p class="muted">当前是本地测试模式，登录功能只在线上 Supabase 模式启用。</p>',
-        renderAccountRecordLists(localAccountRecords()),
-        '  </section>',
-        '</main>'
-      ].join(""), "account");
-      return;
-    }
+    if (accountUI.render(getHashParts()[1] || '')) return;
 
-    if (!isLoggedIn()) {
-      renderShell([
-        '<main class="account-layout">',
-        '  <section class="panel account-panel">',
-        '    <p class="eyebrow">Account</p>',
-        '    <h1>登录或注册</h1>',
-        '    <p class="muted">朋友局轻量账号，不需要邮箱验证码。账号名和密码由你自己设定，请不要使用重要账号的密码。</p>',
-        '    <form class="stack-form account-form" data-action="account-login">',
-        '      <label for="account-username">账号名</label>',
-        '      <input id="account-username" name="username" type="text" autocomplete="username" maxlength="20" placeholder="2-20位，支持中文/英文/数字/下划线">',
-        '      <label for="account-password">密码</label>',
-        '      <input id="account-password" name="password" type="password" autocomplete="current-password" minlength="4" placeholder="至少4位，请勿使用重要账号密码">',
-        '      <div class="dialog-actions">',
-        '        <button class="primary-button" type="submit">登录</button>',
-        '        <button class="secondary-button" data-action="account-register" type="button">注册新账号</button>',
-        '      </div>',
-        '    </form>',
-        '  </section>',
-        '</main>'
-      ].join(""), "account");
-      return;
-    }
-
-    var records;
+    var records, accountToken = getAccountToken(), sequence = renderSequence;
     try {
       records = await loadAccountRecords();
     } catch (error) {
@@ -1556,6 +1619,7 @@
       showToast("账号记录暂时读取失败，请确认已运行最新版 Supabase SQL。");
     }
 
+    if (accountToken !== getAccountToken() || sequence !== renderSequence) return;
     var bindingPayload = collectDeviceBindingPayload();
     var bindCount = bindingPayload.qaPlayers.length + bindingPayload.tycoonPlayers.length;
 
@@ -1566,10 +1630,12 @@
       '    <h1>我的记录</h1>',
       '    <p class="muted">' + escapeHtml(accountLabel()) + '</p>',
       '    <div class="dialog-actions">',
-      bindCount ? '      <button class="primary-button" data-action="account-bind-device" type="button">绑定这台设备里的 ' + bindCount + ' 条匿名记录</button>' : "",
+      '      <a class="secondary-button" href="#account/settings">账号设置</a>',
+      isSupabaseMode() && bindCount ? '      <button class="primary-button" data-action="account-bind-device" type="button">绑定这台设备里的 ' + bindCount + ' 条匿名记录</button>' : "",
       '      <button class="secondary-button" data-action="account-refresh-records" type="button">刷新记录</button>',
       '      <button class="ghost-button" data-action="account-logout" type="button">退出登录</button>',
       '    </div>',
+      !isSupabaseMode() ? '<p class="preview-notice">本地试玩数据仅保存在这个浏览器。</p>' : "",
       renderAccountRecordLists(records),
       '  </section>',
       '</main>'
@@ -1587,6 +1653,10 @@
       '  <div class="account-record-section">',
       '    <h2>Friends Tycoon</h2>',
       renderTycoonAccountRecords(records.tycoon || []),
+      '  </div><div class="account-record-section"><h2>What’s Next?</h2>',
+      spin.records(records.spin || []),
+      '  </div><div class="account-record-section"><h2>Board Games</h2>',
+      boardGames.records(records.board),
       '  </div>',
       '</section>'
     ].join("");
@@ -1634,7 +1704,7 @@
     document.title = "100 Q&As | Friends Games";
     var recentRooms = Object.keys(state.rooms).map(function (id) {
       return state.rooms[id];
-    }).sort(function (a, b) {
+    }).filter(function (room) { return isSupabaseMode() || Boolean(getCurrentPlayer(room)) || room.ownerAccountId === getAuthUser().id; }).sort(function (a, b) {
       return b.createdAt.localeCompare(a.createdAt);
     });
 
@@ -1668,7 +1738,7 @@
     var state = loadTycoonState();
     var recentRooms = Object.keys(state.rooms || {}).map(function (id) {
       return state.rooms[id];
-    }).sort(function (a, b) {
+    }).filter(function (room) { return isSupabaseMode() || Boolean(getTycoonCurrentPlayer(room)) || room.ownerAccountId === getAuthUser().id; }).sort(function (a, b) {
       return b.createdAt.localeCompare(a.createdAt);
     });
 
@@ -1682,8 +1752,7 @@
       '    <section class="panel tycoon-setup-panel">',
       '      <h2>创建房间</h2>',
       '      <form class="stack-form" data-action="tycoon-create-room">',
-      '        <label for="tycoon-host-nickname">你的昵称</label>',
-      '        <input id="tycoon-host-nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="例如 小罗">',
+      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '        <label>选择颜色</label>',
       renderTycoonColorPicker("colorId", 0, null, null),
       '        <label for="tycoon-victory-mode">胜利条件</label>',
@@ -1701,8 +1770,7 @@
       '      <form class="stack-form" data-action="tycoon-join-code">',
       '        <label for="tycoon-room-code">房间码</label>',
       '        <input id="tycoon-room-code" name="roomCode" maxlength="8" autocomplete="off" placeholder="例如 T8K2RA">',
-      '        <label for="tycoon-nickname">你的昵称</label>',
-      '        <input id="tycoon-nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="例如 阿Z">',
+      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '        <label>选择颜色</label>',
       renderTycoonColorPicker("colorId", 1, null, null),
       '        <button class="secondary-button" type="submit">加入游戏</button>',
@@ -1820,7 +1888,7 @@
       '<section class="panel tycoon-inline-join">',
       '  <h2>加入这局 Friends Tycoon</h2>',
       '  <form class="inline-join-form" data-action="tycoon-join-room" data-room-code="' + escapeHtml(room.code) + '">',
-      '    <input name="nickname" maxlength="20" autocomplete="nickname" placeholder="填写昵称">',
+      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       renderTycoonColorPicker("colorId", null, room, null),
       '    <button class="primary-button" type="submit">加入</button>',
       '  </form>',
@@ -1853,7 +1921,6 @@
       '  <div class="tycoon-room-tools">',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-tycoon-link" type="button">↗</button>',
       '    <button class="secondary-button" data-action="open-tycoon-rules" type="button">游戏规则</button>',
-      player && !isSupabaseMode() && room.status === "lobby" ? '    <button class="secondary-button" data-action="new-local-tycoon-player" type="button">本地加朋友</button>' : "",
       canExit ? '    <button class="secondary-button" data-action="tycoon-exit" type="button">退出游戏</button>' : "",
       player && player.status === "bankrupt" ? '    <span class="small-status">已破产</span>' : "",
       canStart ? '    <button class="primary-button" data-action="tycoon-start" type="button">开始游戏</button>' : "",
@@ -2137,10 +2204,7 @@
           '  </div>',
           isCurrent
             ? '  <span class="small-status">当前</span>'
-            : isSupabaseMode()
-              ? (canRemove ? '  <button class="small-button" data-action="tycoon-remove-player" data-player-id="' + escapeHtml(player.id) + '" data-player-name="' + escapeHtml(player.nickname) + '" type="button">移除</button>' : '  <span class="small-status">朋友</span>')
-              : '  <button class="small-button" data-action="switch-tycoon-player" data-player-id="' + escapeHtml(player.id) + '" type="button">切换</button>',
-          !isSupabaseMode() && canRemove ? '  <button class="small-button" data-action="tycoon-remove-player" data-player-id="' + escapeHtml(player.id) + '" data-player-name="' + escapeHtml(player.nickname) + '" type="button">移除</button>' : "",
+            : (canRemove ? '  <button class="small-button" data-action="tycoon-remove-player" data-player-id="' + escapeHtml(player.id) + '" data-player-name="' + escapeHtml(player.nickname) + '" type="button">移除</button>' : '  <span class="small-status">朋友</span>'),
           '</div>'
         ].join("");
       }).join(""),
@@ -2394,10 +2458,9 @@
       '  <section class="panel">',
       '    <p class="eyebrow">Room ' + escapeHtml(room.code) + '</p>',
       '    <h1>加入这局 100 Q&As</h1>',
-      '    <p class="muted">填写一个朋友们认得出的昵称，就可以开始答题。</p>',
+      '    <p class="muted">加入后即可开始答题，房间中展示你的用户名。</p>',
       '    <form class="stack-form" data-action="join-room" data-room-id="' + escapeHtml(room.id) + '">',
-      '      <label for="nickname">昵称</label>',
-      '      <input id="nickname" name="nickname" type="text" maxlength="20" autocomplete="nickname" placeholder="例如 小罗">',
+      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '      <button class="primary-button" type="submit">开始答题</button>',
       '    </form>',
       existingPlayers.length ? renderLocalPlayers(room, null) : "",
@@ -2454,7 +2517,6 @@
       '  </div>',
       '  <div class="room-tools">',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-link">↗</button>',
-      '    <button class="ghost-button" data-action="new-local-player">换个昵称加入</button>',
       '  </div>',
       '  <div class="progress-wrap" aria-label="答题进度">',
       '    <div class="progress-track"><div class="progress-bar" style="width:' + progress + '%"></div></div>',
@@ -2488,7 +2550,7 @@
 
     return [
       '<section class="local-players">',
-      '  <h2>' + (isSupabaseMode() ? "参与者" : "本地玩家") + '</h2>',
+      '  <h2>参与者</h2>',
       '  <div class="player-list">',
       players.map(function (player) {
         var isCurrent = currentPlayer && player.id === currentPlayer.id;
@@ -2502,9 +2564,7 @@
           '  </div>',
           isCurrent
             ? '  <button class="small-button" disabled>当前</button>'
-            : isSupabaseMode()
-              ? '  <span class="small-status">朋友</span>'
-              : '  <button class="small-button" data-action="switch-player" data-player-id="' + escapeHtml(player.id) + '">切换</button>',
+            : '  <span class="small-status">朋友</span>',
           '</div>'
         ].join("");
       }).join(""),
@@ -2530,7 +2590,6 @@
       '    <div class="room-tools">',
       '      <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-link">↗</button>',
       '      <button class="secondary-button" data-action="open-qa-export" data-code="' + escapeHtml(room.code) + '">导出 PDF</button>',
-      '      <button class="secondary-button" data-action="new-local-player">' + (isSupabaseMode() ? "换个昵称加入" : "再加一位本地玩家") + '</button>',
       '    </div>',
       '  </header>',
       renderRoomSummary(room, player),
@@ -2547,7 +2606,7 @@
             var answer = submittedPlayer.answers[String(number)] || "";
             return [
               '<div class="answer-row">',
-              '  <strong>' + escapeHtml(submittedPlayer.nickname) + '</strong>',
+              '  <strong>' + escapeHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
               '  <p>' + escapeHtml(answer) + '</p>',
               '</div>'
             ].join("");
@@ -2618,7 +2677,7 @@
           submittedPlayers.map(function (submittedPlayer) {
             return [
               '<div class="pdf-answer">',
-              '  <strong>' + escapeHtml(submittedPlayer.nickname) + '</strong>',
+              '  <strong>' + escapeHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
               '  <p>' + escapeHtml(submittedPlayer.answers[String(number)] || "") + '</p>',
               '</div>'
             ].join("");
@@ -2734,7 +2793,7 @@
       submittedPlayers.forEach(function (submittedPlayer) {
         var answer = submittedPlayer.answers[String(number)] || "";
         ctx.font = "700 14px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
-        var nameLines = wrapCanvasText(ctx, submittedPlayer.nickname, contentWidth - 24);
+        var nameLines = wrapCanvasText(ctx, submittedPlayer.submittedName || submittedPlayer.nickname, contentWidth - 24);
         ctx.font = "15px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
         var answerLines = wrapCanvasText(ctx, answer || " ", contentWidth - 24);
         var answerHeight = 16 + nameLines.length * 20 + answerLines.length * 24;
@@ -2872,59 +2931,6 @@
     }
   }
 
-  function authFriendlyError(error) {
-    var message = error && error.message ? error.message : "";
-    var normalized = message.toLowerCase();
-    if (/username.*already|duplicate key|already.*exists|exists/.test(normalized)) return "这个账号名已经被使用，换一个账号名或直接登录。";
-    if (/invalid username or password|invalid account session|credentials|login required/.test(normalized)) return "账号名或密码不正确。";
-    if (/invalid username|username.*required|username/.test(normalized)) return "账号名需要 2-20 位，只支持中文、英文、数字和下划线。";
-    if (/password.*short|password/.test(normalized)) return "密码至少需要 4 位，请重新设置。";
-    if (/invalid/.test(normalized)) return "账号名或密码不正确。";
-    return "账号操作失败，请稍后再试。";
-  }
-
-  async function loginAccount(username, password) {
-    var safeUsername = normalizeUsername(username);
-    if (!safeUsername || !password) {
-      showToast("请填写账号名和密码。");
-      return;
-    }
-
-    try {
-      var result = await supabaseRpc("account_login", {
-        p_username: safeUsername,
-        p_password: String(password || "")
-      });
-      saveAuthSession(result);
-      showToast("已登录。");
-      render();
-    } catch (error) {
-      showToast(authFriendlyError(error));
-    }
-  }
-
-  async function registerAccountFromForm(form) {
-    var formData = new FormData(form);
-    var safeUsername = normalizeUsername(formData.get("username"));
-    var password = String(formData.get("password") || "");
-    if (!safeUsername || !password) {
-      showToast("请填写账号名和密码。");
-      return;
-    }
-
-    try {
-      var result = await supabaseRpc("account_register", {
-        p_username: safeUsername,
-        p_password: password
-      });
-      saveAuthSession(result);
-      showToast("注册成功，已登录。");
-      render();
-    } catch (error) {
-      showToast(authFriendlyError(error));
-    }
-  }
-
   async function logoutAccount() {
     var token = getAccountToken();
     try {
@@ -2937,6 +2943,7 @@
       // Local sign-out should still clear the session if the remote logout call fails.
     }
     clearAuthSession();
+    authLastRefresh = 0;
     showToast("已退出登录。");
     render();
   }
@@ -2969,6 +2976,7 @@
   }
 
   async function createRoom(roomQuestions) {
+    if (!requireLogin()) return;
     var selectedQuestions = normalizeQuestionArray(roomQuestions);
     var isCustom = createRoomDraft.mode === "custom";
 
@@ -3012,6 +3020,7 @@
       id: makeId("room"),
       code: code,
       title: "100 Q&As",
+      ownerAccountId: getAuthUser().id,
       createdAt: new Date().toISOString(),
       questions: selectedQuestions.slice(),
       players: {}
@@ -3085,11 +3094,12 @@
   }
 
   async function joinRoom(roomId, nickname) {
+    if (!requireLogin()) return;
     var state = loadState();
     var room = state.rooms[roomId];
     if (!room) return;
 
-    var trimmed = nickname.trim();
+    var trimmed = accountLabel();
     if (!trimmed) return;
 
     if (isSupabaseMode()) {
@@ -3115,8 +3125,10 @@
       return;
     }
 
+    if (getCurrentPlayer(room)) { render(); return; }
     var player = {
       id: makeId("player"),
+      accountId: getAuthUser().id,
       nickname: trimmed,
       createdAt: new Date().toISOString(),
       submittedAt: null,
@@ -3283,6 +3295,7 @@
     }
 
     player.submittedAt = new Date().toISOString();
+    player.submittedName = accountLabel();
     saveState(state);
     closeSubmitConfirm();
     render();
@@ -3426,9 +3439,10 @@
   }
 
   async function createTycoonRoom(nickname, victoryMode, turnLimit, colorId) {
-    var trimmed = String(nickname || "").trim();
+    if (!requireLogin()) return;
+    var trimmed = accountLabel();
     if (!trimmed) {
-      showToast("先填一个昵称。");
+      showToast("请先设置用户名。");
       return;
     }
 
@@ -3476,6 +3490,7 @@
 
     var host = {
       id: makeId("tycoon-player"),
+      accountId: getAuthUser().id,
       nickname: trimmed,
       colorId: safeColorId,
       cash: TYCOON_START_CASH,
@@ -3514,14 +3529,15 @@
   }
 
   async function joinTycoonRoomByCode(code, nickname, colorId) {
+    if (!requireLogin()) return;
     var roomCode = String(code || "").trim().toUpperCase();
-    var trimmed = String(nickname || "").trim();
+    var trimmed = accountLabel();
     if (!roomCode) {
       showToast("请输入房间码。");
       return;
     }
     if (!trimmed) {
-      showToast("先填一个昵称。");
+      showToast("请先设置用户名。");
       return;
     }
     var safeColorId = normalizeTycoonColorId(colorId);
@@ -3568,6 +3584,7 @@
 
   function joinTycoonRoomLocal(state, room, nickname, colorId) {
     room = normalizeTycoonRoom(room);
+    if (getTycoonCurrentPlayer(room)) { setRoute("tycoon/room/" + room.code); render(); return; }
     if (room.status !== "lobby") {
       showToast("游戏已经开始，暂时不能中途加入。");
       return;
@@ -3580,6 +3597,7 @@
 
     var player = {
       id: makeId("tycoon-player"),
+      accountId: getAuthUser().id,
       nickname: nickname,
       colorId: getAvailableTycoonColorId(room, colorId, null),
       cash: TYCOON_START_CASH,
@@ -4054,6 +4072,9 @@
     if (action === "open-lobby") setRoute("home");
     if (action === "open-qa") setRoute("qa");
     if (action === "open-tycoon") setRoute("tycoon");
+    if (action === "open-board") { setRoute("board"); return; }
+    if (action === "open-spin") setRoute("spin");
+    if (action === "retry-room") render();
     if (action === "open-account") setRoute("account");
     if (action === "open-create-room") setRoute("qa/create");
     if (action === "set-question-mode") setQuestionMode(target.getAttribute("data-mode"));
@@ -4067,8 +4088,6 @@
     if (action === "confirm-submit") finishSubmitAnswers();
     if (action === "cancel-submit") closeSubmitConfirm();
     if (action === "copy-link") copyLink();
-    if (action === "new-local-player") clearCurrentPlayer();
-    if (action === "switch-player") switchPlayer(target.getAttribute("data-player-id"));
     if (action === "copy-tycoon-link") copyTycoonLink();
     if (action === "tycoon-start") {
       markTycoonInteraction();
@@ -4141,9 +4160,6 @@
       closeSubmitConfirm();
       removeTycoonPlayer(removePlayerId);
     }
-    if (action === "new-local-tycoon-player") clearCurrentTycoonPlayer();
-    if (action === "switch-tycoon-player") switchTycoonPlayer(target.getAttribute("data-player-id"));
-    if (action === "account-register") registerAccountFromForm(target.closest("form"));
     if (action === "account-logout") logoutAccount();
     if (action === "account-bind-device") bindDeviceRecordsToAccount();
     if (action === "account-refresh-records") {
@@ -4190,14 +4206,6 @@
 
     if (action === "create-room") {
       submitCreateRoom();
-    }
-
-    if (action === "account-login") {
-      var accountData = new FormData(form);
-      loginAccount(
-        String(accountData.get("username") || ""),
-        String(accountData.get("password") || "")
-      );
     }
 
     if (action === "tycoon-create-room") {
@@ -4250,6 +4258,16 @@
   });
 
   window.addEventListener("hashchange", render);
+  window.addEventListener('storage', function (event) {
+    if (event.key === AUTH_SESSION_KEY) {
+      var before = event.oldValue ? JSON.parse(event.oldValue) : null;
+      var after = event.newValue ? JSON.parse(event.newValue) : null;
+      if ((before && before.token) !== (after && after.token) || (before && before.account && before.account.displayName) !== (after && after.account && after.account.displayName)) { authLastRefresh = 0; accountRecordsCache = null; render(); }
+    }
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { authLastRefresh = 0; ensureFreshAuthSession(); }
+  });
 
   if (!window.location.hash) {
     setRoute("home");

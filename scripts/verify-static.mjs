@@ -8,7 +8,7 @@ function assert(condition, message) {
 }
 
 const indexHtml = readFileSync("index.html", "utf8");
-const appJs = readFileSync("src/app.js", "utf8");
+const appJs = readFileSync("src/app.js", "utf8") + readFileSync("src/account.js", "utf8");
 const configJs = readFileSync("src/config.js", "utf8");
 const questionsJs = readFileSync("src/questions.js", "utf8");
 const stylesCss = readFileSync("src/styles.css", "utf8");
@@ -96,7 +96,6 @@ assert(appJs.includes('data-action="preview-qa-pdf"'), "PDF export page must sup
 assert(appJs.includes("makeQaPdfBlob"), "PDF export must generate a PDF file without requiring print.");
 assert(appJs.includes('data-action="print-pdf"'), "PDF export page must trigger browser print.");
 assert(!appJs.includes("data-create-submit disabled"), "Custom question bank create button should stay clickable for feedback.");
-assert(appJs.includes('data-action="switch-player"'), "Local player switching action must exist.");
 assert(stylesCss.includes(".modal-backdrop"), "Submit dialog backdrop styles must exist.");
 assert(stylesCss.includes(".confirm-dialog"), "Submit dialog styles must exist.");
 assert(stylesCss.includes(".room-summary"), "Room summary styles must exist.");

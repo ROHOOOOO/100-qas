@@ -69,6 +69,26 @@ page.on("pageerror", (error) => {
   consoleErrors.push(error.message);
 });
 
+async function signIn(username, register = false) {
+  await page.goto(`${appUrl}#account`);
+  const logout = page.getByRole("button", { name: "退出登录", exact: true });
+  await page.locator('#account-username, [data-action="account-logout"]').waitFor();
+  if (await logout.count()) await logout.click();
+  if (register) {
+    await page.getByRole("link", { name: "注册新账号", exact: true }).click();
+    await page.getByRole("heading", { name: "注册新账号", exact: true }).waitFor();
+  }
+  await page.getByLabel("账号", { exact: true }).fill(username);
+  await page.locator("#account-password").fill("testpass123");
+  if (register) {
+    await page.getByLabel("用户名", { exact: true }).fill(username === "local_host" ? "Tycoon房主" : "Tycoon朋友");
+    await page.getByLabel("确认密码", { exact: true }).fill("testpass123");
+    await page.getByLabel("密保答案", { exact: true }).fill("test answer");
+  }
+  await page.locator(`form[data-account="${register ? "register" : "login"}"] button[type="submit"]`).click();
+  await page.getByRole("heading", { name: "我的记录", exact: true }).waitFor();
+}
+
 try {
   await page.goto(appUrl);
   assert((await page.title()).includes("Friends Games"), "App title should identify Friends Games.");
@@ -77,24 +97,27 @@ try {
   await page.getByRole("button", { name: "进入 Friends Tycoon" }).waitFor();
   await page.screenshot({ path: lobbyScreenshot, fullPage: false });
 
+  await signIn("local_host", true);
+  await page.goto(`${appUrl}#home`);
   await page.getByRole("button", { name: "进入 Friends Tycoon" }).click();
   await page.getByRole("heading", { name: "Friends Tycoon" }).waitFor();
   await page.getByText("32 格世界旅行").waitFor();
   await page.getByText("退出即破产，其他人继续").waitFor();
   await page.screenshot({ path: tycoonScreenshot, fullPage: false });
 
-  await page.locator("#tycoon-host-nickname").fill("Tycoon房主");
   await page.getByRole("button", { name: "创建 Friends Tycoon 房间" }).click();
   await page.waitForURL(/#tycoon\/room\//);
   await page.getByText("至少 2 人开始").waitFor();
-  await page.getByRole("button", { name: "本地加朋友" }).click();
-  await page.locator(".inline-join-form input[name=\"nickname\"]").fill("Tycoon朋友");
+  const tycoonUrl = page.url();
+  await signIn("local_friend", true);
+  await page.goto(tycoonUrl);
   await page.locator(".inline-join-form button").click();
   await page.locator(".tycoon-desktop-center .tycoon-player-list").getByText("Tycoon朋友").waitFor();
   await page.locator(".tycoon-side-panel .tycoon-chat-form input[name=\"message\"]").fill("准备好了");
   await page.locator(".tycoon-side-panel .tycoon-chat-form button").click();
   await page.getByText("准备好了").waitFor();
-  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await signIn("local_host");
+  await page.goto(tycoonUrl);
   await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByText("游戏中 · 第 1 回合").first().waitFor();
   await page.locator('[data-action="tycoon-cell-detail"][data-cell-index="1"]').click();
@@ -114,7 +137,8 @@ try {
     await page.getByRole("button", { name: "跳过" }).click();
   }
   await page.getByRole("heading", { name: "Tycoon朋友 的回合" }).waitFor();
-  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await signIn("local_friend");
+  await page.goto(tycoonUrl);
   await page.getByRole("button", { name: "退出游戏" }).click();
   await page.getByRole("heading", { name: "确认退出吗?" }).waitFor();
   await page.getByRole("button", { name: "确认退出" }).click();
@@ -123,7 +147,8 @@ try {
   await page.getByText("已结束").first().waitFor();
   await page.locator(".tycoon-board-center .tycoon-final-results").getByText("最终结果").waitFor();
   assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Bankrupt Tycoon player should not see the exit button again.");
-  await page.locator('[data-action="switch-tycoon-player"]').first().click();
+  await signIn("local_host");
+  await page.goto(tycoonUrl);
   await page.locator(".tycoon-board-center .tycoon-final-results").getByText("胜利者：Tycoon房主").waitFor();
   assert(await page.getByRole("button", { name: "退出游戏" }).count() === 0, "Finished Tycoon winner should not see the exit button.");
   await page.screenshot({ path: tycoonRoomScreenshot, fullPage: false });
@@ -169,7 +194,6 @@ try {
   await page.getByRole("button", { name: "生成房间" }).click();
   await page.waitForURL(/#qa\/room\//);
 
-  await page.getByLabel("昵称").fill("完整验证玩家");
   await page.getByRole("button", { name: "开始答题" }).click();
   await page.getByText("自定义问题 1?").waitFor();
 
@@ -215,24 +239,26 @@ try {
   await page.getByRole("button", { name: "返回结果页" }).click();
   await page.getByRole("heading", { name: "大家的答案" }).waitFor();
 
-  await page.getByRole("button", { name: "再加一位本地玩家" }).click();
+  const qaUrl = page.url();
+  await signIn("local_friend");
+  await page.goto(qaUrl);
   await page.getByRole("heading", { name: "加入这局 100 Q&As" }).waitFor();
   assert(await page.locator(".player-row").count() === 1, "Join page should show the submitted local player.");
 
-  await page.getByLabel("昵称").fill("未提交玩家");
   await page.getByRole("button", { name: "开始答题" }).click();
-  await page.getByRole("heading", { name: "未提交玩家 的 3 Q&As" }).waitFor();
+  await page.getByRole("heading", { name: "Tycoon朋友 的 3 Q&As" }).waitFor();
 
   assert(await page.getByRole("heading", { name: "大家的答案" }).count() === 0, "Unsubmitted player should not see results.");
   assert(await page.locator("textarea").count() === customQuestions.length, "Unsubmitted player should stay on the answer page.");
   assert(await page.locator(".player-row").count() === 2, "Room should show two local players.");
-  assert(await page.locator('[data-action="switch-player"]').count() === 1, "There should be one other local player to switch to.");
+  assert(await page.locator('[data-action="switch-player"]').count() === 0, "Accounts must not expose identity-switch controls.");
 
   const roomSummaryText = await page.locator(".room-summary").textContent();
   assert(roomSummaryText.includes("加入2 人"), "Room summary should show two joined players.");
   assert(roomSummaryText.includes("提交1 人"), "Room summary should show one submitted player.");
 
-  await page.locator('[data-action="switch-player"]').click();
+  await signIn("local_host");
+  await page.goto(qaUrl);
   await page.getByRole("heading", { name: "大家的答案" }).waitFor();
   assert(await page.locator("textarea").count() === 0, "Switching back to submitted player should keep answers locked.");
   assert(await page.locator(".answer-row").count() === 3, "Results should still show only submitted players.");
@@ -243,8 +269,8 @@ try {
     const room = Object.values(state.rooms)[0];
     const players = room ? Object.values(room.players) : [];
     const submittedPlayers = players.filter((player) => Boolean(player.submittedAt));
-    const firstPlayer = players.find((player) => player.nickname === "完整验证玩家");
-    const secondPlayer = players.find((player) => player.nickname === "未提交玩家");
+    const firstPlayer = players.find((player) => player.nickname === "Tycoon房主");
+    const secondPlayer = players.find((player) => player.nickname === "Tycoon朋友");
     return {
       roomCode: room ? room.code : null,
       playerCount: players.length,
@@ -267,8 +293,8 @@ try {
   assert(!stateSummary.secondSubmitted, "Second player should remain unsubmitted.");
   assert(stateSummary.secondAnswerCount === 0, "Second player should have no saved answers in this scenario.");
 
-  await page.getByRole("button", { name: "登录" }).click();
-  await page.getByRole("heading", { name: "本地模式记录" }).waitFor();
+  await page.goto(`${appUrl}#account`);
+  await page.getByRole("heading", { name: "我的记录" }).waitFor();
   assert(await page.locator(".account-record-card").count() >= 2, "Local account page should list local QA and Tycoon records.");
   assert(await page.getByText("100 Q&As").count() >= 1, "Account page should include 100 Q&As records.");
   assert(await page.getByText("Friends Tycoon").count() >= 1, "Account page should include Friends Tycoon records.");
@@ -327,6 +353,10 @@ try {
       mobileTycoonRoom: mobileTycoonRoomScreenshot
     }
   }, null, 2));
+} catch (error) {
+  console.error(await page.locator("body").innerText());
+  console.error(await page.locator("form").evaluateAll(forms => forms.map(f => ({ valid: f.checkValidity(), fields: [...f.querySelectorAll("input")].map(n => ({id: n.id, length: n.value.length, valid: n.checkValidity()})) }))));
+  throw error;
 } finally {
   await browser.close();
 }

@@ -11,7 +11,7 @@
 这个组合的好处：
 
 - 朋友只需要打开一个网页链接。
-- 不需要注册账号。
+- 三个游戏共用账号名与密码，登录后记住当前浏览器。
 - 不需要手动发答案包。
 - GitHub Pages 可以免费托管静态网页。
 - Supabase 保存房间、玩家和答案。
@@ -48,29 +48,53 @@
 - 100 Q&As PDF 导出已从“仅打印保存”升级为“直接下载 PDF + 预览兜底 + 打印辅助”。
 - 最新 `supabase/schema.sql` 已由用户在 Supabase SQL Editor 成功运行，线上验收已通过。
 
+## 2026-10-03 更新发布顺序
+
+What’s Next? 与统一登录已在源码和隔离测试数据库实现，尚未操作正式数据库或发布网站。
+
+1. 在 Supabase SQL Editor 执行完整的 `supabase/schema.sql`。该文件包含事务，可用于已有项目升级，也可重复执行；保留已有账号、房间、答案和历史。
+2. 确认 SQL 成功后再发布本次前端，保持数据库与前端配套。新版数据库会要求账号登录。
+3. 用两个测试账号验证创建、加入、共同抽取、各自抽取、历史和原有游戏。
+4. 如果数据库执行失败，事务会回滚；暂缓发布前端，先修复 SQL。
+
+## 2026-10-04 账号更新发布
+
+本轮包含用户名、账号设置和密保重设密码，需先执行完整的最新版 `supabase/schema.sql`，再同步发布前端。SQL 会新增账号资料、恢复限制字段、恢复凭证表，以及新的注册、改名和恢复 RPC；旧两个参数的注册入口会删除。用户确认暂无旧账号，因此不提供资料补填向导。不会删除原有房间或记录。
+
+本轮开发验证使用隔离数据库，没有改动正式 Supabase 或 GitHub Pages。
+
 ## 使用流程
 
 ### 100 Q&As
 
-1. 打开网页。
+1. 打开网页并登录或注册朋友账号。
 2. 在游戏大厅选择 `100 Q&As`。
 3. 创建房间时选择默认题库或自定义题库，也可以打开你发的房间链接。
-4. 输入昵称。
+4. 使用当前账号的用户名加入。
 5. 分页填写当前房间题库的全部题目。
 6. 提交。
 7. 提交后自动看到同一房间里已提交朋友的答案。
 
 ### Friends Tycoon
 
-1. 打开网页。
+1. 打开网页并登录或注册朋友账号。
 2. 在游戏大厅选择 `Friends Tycoon`。
-3. 房主填写昵称，选择胜利条件，创建房间。
+3. 房主选择胜利条件，使用当前用户名创建房间。
 4. 房主复制邀请链接或房间码发给朋友。
-5. 朋友打开链接或输入房间码，填写昵称加入。
+5. 朋友打开链接或输入房间码，使用当前用户名加入。
 6. 2 到 6 人加入后，由房主开始游戏。
 7. 玩家轮流掷骰、移动、买地、升级、聊天；掷骰后的买地/升级 8 秒未操作默认跳过。
 8. 玩家主动退出后状态变为破产，其他人继续。
 9. 游戏结束后查看最终结果。
+
+### What’s Next?
+
+1. 登录后从大厅进入 What’s Next?。
+2. 输入房间名称、每行一个选项，选择共同或各自抽取，创建房间。
+3. 复制邀请链接给朋友；朋友登录后加入，或输入六位房间码。
+4. 点击“旋转转盘”；完成后结果进入所有成员可见的历史。
+5. 房主可在无人旋转时展开“房间设置”修改名称、选项和模式。
+6. 下次从“我的记录”进入。
 
 ## Supabase 设置
 
@@ -111,6 +135,9 @@ supabase/schema.sql
 - `tycoon_messages`
 - `game_accounts`
 - `game_account_sessions`
+- `spin_rooms`、`spin_members`、`spin_draws`
+- `spin_create_room`、`spin_join_room`、`spin_get_room`、`spin_update_room`、`spin_draw`、`spin_get_history`
+- `account_refresh`
 - `account_register`
 - `account_login`
 - `account_logout`
@@ -224,34 +251,65 @@ https://yourname.github.io/100-qas/
 
 当前代码使用相对路径，适合这两种方式。
 
-## 上线前检查
-
-上线前运行：
+## 验证命令
 
 ```bash
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-static.mjs
+node scripts/verify-static.mjs
+node scripts/verify-browser.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-online.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-whats-next.mjs
+QA_ONLINE_URL="测试站点地址" node scripts/verify-account.mjs
 ```
 
-如果本机允许浏览器自动化，也运行：
+浏览器回归需要 Playwright 和可用 Chromium/Chrome。数据库版浏览器测试必须明确设置测试站点地址，会创建测试账号、房间和记录。
+
+独立数据库回归使用 PGlite（带 pgcrypto），不会访问 Supabase。可将测试依赖安装到临时目录：
 
 ```bash
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-browser.mjs
+npm install --prefix /tmp/friends-games-tests @electric-sql/pglite
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-database.mjs
 ```
 
-线上环境验收运行：
-
-```bash
-/Users/rohooooo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-online.mjs
-```
-
-说明：线上验收会创建自定义题库测试房间和测试答案，用于确认 GitHub Pages 与 Supabase 的真实连接状态。
+覆盖匿名请求拒绝、越权操作、抽取去重、共享结果、各自抽取、选项快照、历史分页、跨设备会话、到期与注销、旧匿名绑定、表权限及 SQL 重复执行。
 
 ## 重要限制
 
 第一版是熟人私密玩法，不是强安全系统。
 
 - 拿到房间链接的人可以加入房间。
-- 不做注册账号。
-- 用户换浏览器或清除浏览器数据后，可能无法继续原来的草稿。
+- 创建、加入、参与和读取房间记录需要登录。
+- 换浏览器或清除本机数据后，重新登录同一账号可恢复云端记录；旧匿名记录需要先在原设备绑定。
 - 提交后不能修改。
 - 自定义题库第一版只支持纯文本文件或直接粘贴，不直接解析 Word `.docx`。
+
+## Board Games 发布
+
+本次源码新增 `src/board/`，必须与新版 `index.html` 一起发布。发布前在 Supabase SQL Editor 执行完整的 `supabase/schema.sql`，包含三张棋类表和五个 RPC。脚本支持重复执行，不清空既有账号、其他游戏或棋谱。前端仍是静态文件，无新增生产 npm 依赖或常驻棋类服务。
+
+1. 先完成数据库升级，再发布前端。
+2. 用两个账号测试邀请、准备、交替落子、悔棋确认、下一局与私人棋谱权限。
+3. 测试两种棋的三档电脑、刷新继续和账号记录。
+4. 在 `?backend=local#board` 只能测试同浏览器本地数据；真实跨设备好友房间使用正式后端。
+
+棋类独立验证：
+
+```bash
+node scripts/verify-board-rules.cjs
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-board-database.mjs
+```
+
+规则脚本不需要外部依赖。数据库脚本创建隔离内存数据库，不访问正式 Supabase。此次没有执行正式发布或 GitHub 推送。
+
+### 2026-10-05 扩展发布补充
+
+当前最新脚本在上述首版基础上增加 `board_seats`、`board_messages`、`board_halma_geometry`、三种棋的验证函数和两个聊天 RPC，共七个公开棋类 RPC。必须执行完整 `supabase/schema.sql`，随后发布完整 `src/board/`、`src/app.js`、`src/styles.css` 和 `index.html`。这也迁移原双人席位和未完成投票；旧棋谱标识不变。
+
+新增检查：
+
+```bash
+node scripts/verify-board-expanded.cjs
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-board-expanded-database.mjs
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-board-upgrade.mjs
+```
+
+发布验收需增加国际象棋升变、3–6 人跳棋、2–4 人飞行棋、手动托管与接回，以及中英文聊天跨换局保留。临时测试服务的数据库入口只用于隔离验收，不是需要部署的生产组件。
