@@ -13,3 +13,5 @@
 - 桌面 1365×1000、手机尺寸 390×844 页面与截图检查通过，无未解释的浏览器错误。Browser plugin not available，使用现有 Playwright 与 Chrome；不代表手机真机或 Safari 验收。
 - 完整交互检查期间电脑网络曾短暂中断（ERR_NETWORK_IO_SUSPENDED / ERR_NETWORK_CHANGED），所有功能步骤仍通过；随后新建浏览器会话复查双账号聊天、刷新、转盘历史和大厅，未出现控制台或 HTTP 错误。一次 Room changed 冲突由页面自动重试恢复。
 - 线上验收使用两个独立测试账号，未改动真实玩家的账号或对局。
+
+- 按用户要求新增网站根目录验证文件 `11913a33c88e654fee940c75bb5a431d.txt`，内容与提供的验证字符串完全一致。
