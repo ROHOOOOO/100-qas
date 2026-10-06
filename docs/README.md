@@ -8,7 +8,7 @@
 
 - [product-requirements.md](product-requirements.md)：产品需求、用户流程、功能边界。
 - [question-bank.md](question-bank.md)：100 个问题的正式题库。
-- [whats-next-requirements.md](whats-next-requirements.md)：What’s Next? 已确认需求、两种抽取模式、共享历史及统一登录规则（已实现，待发布）。
+- [whats-next-requirements.md](whats-next-requirements.md)：What’s Next? 已确认需求、两种抽取模式、共享历史及统一登录规则（已于 2026-10-06 发布）。
 - [friends-tycoon-requirements.md](friends-tycoon-requirements.md)：Friends Tycoon 的已确认玩法、UI 和后续待确认项。
 - [account-and-export-requirements.md](account-and-export-requirements.md)：登录账号与用户名、密保重设密码、多端同步和 PDF 导出需求。
 - [technical-architecture.md](technical-architecture.md)：技术路线、数据模型、权限方案。
