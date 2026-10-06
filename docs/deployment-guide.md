@@ -324,3 +324,11 @@ PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite no
 ```
 
 发布验收需增加国际象棋升变、3–6 人跳棋、2–4 人飞行棋、手动托管与接回，以及中英文聊天跨换局保留。临时测试服务的数据库入口只用于隔离验收，不是需要部署的生产组件。
+
+## 微信网站验证文件
+
+- 验证文件：`11913a33c88e654fee940c75bb5a431d.txt`。
+- 项目目录地址：https://rohooooo.github.io/100-qas/11913a33c88e654fee940c75bb5a431d.txt
+- 域名根目录地址：https://rohooooo.github.io/11913a33c88e654fee940c75bb5a431d.txt
+- 域名根目录由独立仓库 `ROHOOOOO/rohooooo.github.io` 发布，本地目录为 `/Users/rohooooo/Developer/rohooooo.github.io`。
+- 2026-10-06 已确认两个地址均可访问、内容相同；微信后台校验结果需在平台内确认。若平台重新生成验证文件，两处都要同步更新。
