@@ -332,3 +332,18 @@ PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite no
 - 域名根目录地址：https://rohooooo.github.io/11913a33c88e654fee940c75bb5a431d.txt
 - 域名根目录由独立仓库 `ROHOOOOO/rohooooo.github.io` 发布，本地目录为 `/Users/rohooooo/Developer/rohooooo.github.io`。
 - 2026-10-06 已确认两个地址均可访问、内容相同；微信后台校验结果需在平台内确认。若平台重新生成验证文件，两处都要同步更新。
+
+## 多语言前端更新（待发布）
+
+2026-10-14/15 的语言功能仍为本地改动。发布时包含 `src/i18n.js`、`src/i18n-catalog.js`、更新后的 `index.html` 和游戏界面文件。没有 SQL 变更，无需重复迁移数据库。发布后检查三语首页、现有账号记录和默认题库，确保新增两个脚本均可加载。
+
+## 同词相遇更新（2026-11-02，待发布）
+
+本次包含数据库变更，与上面的纯多语言更新不同。按以下顺序发布：
+
+1. 已有账号/棋类项目在 Supabase SQL Editor **运行** `supabase/words.sql`；新项目运行完整 `supabase/schema.sql`。两者可重复执行，保留原数据。
+2. 确认五个接口存在：`words_create_room`、`words_get_room`、`words_action`、`words_history`、`words_records`。失败时事务回滚，先排查 SQL 再发布前端。
+3. 一起发布 `src/words/`、`licenses/word-meet-opencc.txt`、`src/local-backend.js`、`src/app.js`、`src/styles.css`、`src/i18n.js`、`src/i18n-catalog.js`、`index.html`，以及先前尚未发布的其他多语言改动。
+4. 用两个账号验收邀请、同时准备、单方词语不可见、双方揭晓、相同结束、刷新与记录；再验证原有功能。
+
+生产不需要 PGlite、OpenCC npm 包或新的服务器。PGlite 仅用于临时测试；OpenCC 的固定字符映射已随源代码附带并保留授权声明。本轮没有发布前端或修改正式数据库。

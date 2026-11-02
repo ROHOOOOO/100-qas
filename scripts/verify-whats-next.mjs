@@ -13,7 +13,7 @@ if (!base) throw new Error('Set QA_ONLINE_URL to a test deployment; this test cr
 (async()=>{
  const chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
  const browser=await chromium.launch({headless:true,...(existsSync(chrome)?{executablePath:chrome}:{})});
- const aContext=await browser.newContext({viewport:{width:1365,height:950}}),bContext=await browser.newContext({viewport:{width:390,height:844}});
+ const aContext=await browser.newContext({locale:'zh-CN',viewport:{width:1365,height:950}}),bContext=await browser.newContext({locale:'zh-CN',viewport:{width:390,height:844}});
  const a=await aContext.newPage(),b=await bContext.newPage();global.testPages=[a,b];global.testBrowser=browser;
  for(const p of [a,b]){p.on('pageerror',e=>errors.push(e.message));p.on('console',m=>{if(m.type()==='error')errors.push(m.text())});}
  async function register(page,name,url){

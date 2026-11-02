@@ -59,7 +59,7 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 - 不一次性实现所有功能。
 - 每次新增功能后，至少完成一次手动流程验证。
 - 文件命名清晰，避免无意义缩写。
-- 用户可见文案使用中文。
+- 系统文案维护简体中文、繁体中文、英文；用户内容不翻译。新增文案同步补齐 `src/i18n-catalog.js`。
 - 新增小游戏时，先更新 `docs/product-requirements.md` 和对应游戏需求文档，再实现入口和核心流程。
 - 不同小游戏应使用独立路由和独立数据模型，避免互相影响。
 
@@ -151,3 +151,20 @@ Codex 也应在每天开发结束时自动更新当天记录。若自动化未�
 - `PGLITE_MODULE_PATH=... node scripts/verify-board-expanded-database.mjs`：隔离 PostgreSQL 对照、多人席位/排名、托管/中断、聊天权限与去重。
 - `PGLITE_MODULE_PATH=... node scripts/verify-board-upgrade.mjs`：创建首版房间和未完投票，再应用新版完整 SQL，验证继续操作与旧棋谱。
 - 原 `verify-board-rules.cjs`、`verify-board-database.mjs` 继续覆盖五子棋和象棋。浏览器验证在临时测试服务及浏览器内进行，不写入用户真实数据。
+
+## 多语言回归
+
+先启动本地服务，再运行 `QA_I18N_URL=http://127.0.0.1:8000/ node scripts/verify-i18n.mjs`。脚本强制使用 `backend=local`，在新浏览器上下文中测试，不写入线上账号。
+
+现有中文浏览器脚本显式设置 `locale: zh-CN`；新增语言脚本覆盖浏览器自动选择、记忆、默认题库、用户原文保护、草稿保留和手机控件。现有 `verify-browser.mjs` 继续覆盖中文问答与 Tycoon 操作及 PDF 下载。
+
+## 同词相遇验证
+
+```bash
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-words-database.mjs
+PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite node scripts/verify-words-browser.mjs
+```
+
+依赖沿用隔离 PGlite（含 pgcrypto）和已有 Playwright/Chrome。数据库脚本对照本地/SQL 模型、验证权限、匹配、历史、过期轮次、重试和重复升级；浏览器脚本自行启动临时服务和两个独立账号，连接内存数据库，绝不访问正式 Supabase。截图放在系统临时目录。Browser 插件未安装，本次以 Playwright 验收。
+
+本次新模块文案维护在 `src/words/messages.js`，必须在 `src/i18n.js` 之前加载。所有新词条仍需三语齐备；用户内容使用原文边界。

@@ -119,7 +119,8 @@
     }
     account = session(db, p.p_account_token);
     var result;
-    if (name.startsWith('board_')) result = window.BoardLocal.run(db, name, p, account);
+    if (name.startsWith('words_')) result = window.WordMeetLocal.run(db, name, p, account);
+    else if (name.startsWith('board_')) result = window.BoardLocal.run(db, name, p, account);
     else if (name === 'account_refresh') result = payload(db, p.p_account_token, account);
     else if (name === 'account_update_profile') { validateName(p.p_display_name); account.displayName=p.p_display_name.trim(); result=payload(db,p.p_account_token,account); }
     else if (name === 'spin_records') result = Object.values(db.rooms).filter(function (r) { return r.members.some(function (m) { return m.id === account.id; }); }).map(function (r) { return { roomCode: r.code, title: r.title, mode: r.mode, isHost: r.owner === account.id }; });

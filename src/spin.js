@@ -1,11 +1,11 @@
 (function () {
   window.createSpinModule = function (api) {
+    var u = window.FriendsI18n.user;
     var data = null, code = '', history = [], olderCursor = null, more = false;
     var epoch = 0, pollTimer, tickTimer, pending = false, offset = 0, wheelKey = '', historyKey = '';
     var e = api.escape, wheelState = null;
     var colors = ['#d9ebe3', '#f5d5c8', '#f4e6b8', '#dce8f1', '#e5dff0', '#f4dedf'];
     function mode(value) { return value === 'shared' ? '共同抽取' : '各自抽取'; }
-    function time(value) { return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
     function serverTime() { return Date.now() + offset; }
     function selectedDraw() { return data && data.isMember ? (data.room.mode === 'shared' ? data.lastShared : data.lastPersonal) : null; }
     function spinning(draw) { return draw && Date.parse(draw.endsAt) > serverTime(); }
@@ -33,11 +33,11 @@
     function records(rows) {
       if (!rows.length) return '<p class="muted">还没有转盘房间，去创建一个吧。</p>';
       return '<div class="account-record-list">' + rows.map(function (r) {
-        return '<article class="account-record-card"><div><strong>' + e(r.title) + '</strong><p>' + e(r.roomCode) + ' · ' + mode(r.mode) + (r.isHost ? ' · 房主' : '') + '</p></div><button class="small-button" data-spin="open" data-code="' + e(r.roomCode) + '">进入</button></article>';
+        return '<article class="account-record-card"><div><strong>' + u(r.title) + '</strong><p>' + e(r.roomCode) + ' · ' + mode(r.mode) + (r.isHost ? ' · 房主' : '') + '</p></div><button class="small-button" data-spin="open" data-code="' + e(r.roomCode) + '">进入</button></article>';
       }).join('') + '</div>';
     }
     function home() {
-      document.title = 'What’s Next? | Friends Games';
+      window.FriendsI18n.title( 'What’s Next? | Friends Games');
       api.shell('<main class="spin-layout"><header class="spin-intro"><p class="eyebrow">A little chance. A good time.</p><h1>What’s Next?</h1><p class="lead">把纠结写下来，把下一步交给转盘。</p></header>' +
         '<div class="spin-setup"><section class="panel"><h2>创建一个转盘</h2><form class="stack-form" data-spin="create">' + inputs({}) + '<button class="primary-button" type="submit">创建转盘房间</button></form></section>' +
         '<aside class="spin-aside"><section class="panel"><h2>朋友已经开好房间？</h2><form class="stack-form" data-spin="join-code"><label for="spin-code">房间码</label><input id="spin-code" name="code" required maxlength="6" autocomplete="off" placeholder="输入 6 位房间码"><button class="secondary-button" type="submit">加入房间</button></form></section>' +
@@ -72,15 +72,15 @@
         '><summary><span class="spin-fold-label">' + title + '</span><span class="spin-fold-action" aria-hidden="true"><span class="when-closed">展开</span><span class="when-open">收起</span><span class="spin-fold-chevron">⌄</span></span></summary>';
     }
     function roomShell() {
-      document.title = data.room.title + ' | What’s Next?';
+      window.FriendsI18n.title(data.room.title + ' | What’s Next?', true);
       if (!data.isMember) {
-        api.shell('<main class="narrow-layout"><section class="panel"><p class="eyebrow">What’s Next? · ' + e(code) + '</p><h1>' + e(data.room.title) + '</h1><p>加入后就能一起转盘，查看这个房间的抽取历史。</p><button class="primary-button" data-spin="join">加入这个房间</button></section></main>', 'spin'); return;
+        api.shell('<main class="narrow-layout"><section class="panel"><p class="eyebrow">What’s Next? · ' + e(code) + '</p><h1>' + u(data.room.title) + '</h1><p>加入后就能一起转盘，查看这个房间的抽取历史。</p><button class="primary-button" data-spin="join">加入这个房间</button></section></main>', 'spin'); return;
       }
-      api.shell('<main class="spin-layout spin-room"><header class="spin-room-header"><div><a href="#spin" class="spin-back">← What’s Next?</a><h1 id="spin-room-title"></h1><p><span class="spin-mode-badge" id="spin-mode-label"></span> <span class="muted">房间码 ' + e(code) + '</span></p></div><button class="secondary-button" data-spin="copy">复制邀请链接</button></header>' +
+      api.shell('<main class="spin-layout spin-room"><header class="spin-room-header"><div><a href="#spin" class="spin-back">← What’s Next?</a><h1 id="spin-room-title" translate="no"></h1><p><span class="spin-mode-badge" id="spin-mode-label"></span> <span class="muted">房间码 ' + e(code) + '</span></p></div><button class="secondary-button" data-spin="copy">复制邀请链接</button></header>' +
         '<p id="spin-sync-status" class="field-hint" role="status"></p><div class="spin-room-grid"><section class="panel spin-stage"><p class="eyebrow">Let chance choose</p><div class="spin-wheel-wrap"><span class="spin-pointer" aria-hidden="true"></span><div id="spin-wheel"></div><span class="spin-wheel-center" aria-hidden="true">✦</span></div>' +
         '<div id="spin-result" class="spin-result" aria-live="polite"></div><button id="spin-draw-button" class="primary-button spin-draw-button" data-spin="draw">旋转转盘</button><p id="spin-explainer" class="field-hint"></p>' + panelStart('options', '所有选项 <span id="spin-option-count" class="muted"></span>') + '<ul id="spin-option-list" class="spin-options-list"></ul></details></section>' +
         '<aside class="spin-aside"><section class="panel spin-history-panel">' + panelStart('history', '抽取历史 <span class="muted">全员可见</span>') + '<p class="field-hint">记录每次选择，也记录一起犹豫的时刻。</p><div id="spin-history"></div><button id="spin-more" class="ghost-button" data-spin="more">加载更早的记录</button></details></section>' +
-        '<section class="panel"><h2>房间成员</h2><p id="spin-members" class="muted"></p>' + (data.room.isHost ? '<details id="spin-settings"><summary>房间设置 · 仅房主可编辑</summary><form class="stack-form" data-spin="save" data-version="' + data.room.version + '"><fieldset id="spin-edit-fields">' + inputs(data.room) + '<button class="secondary-button" type="submit">保存设置</button></fieldset><p id="spin-edit-hint" class="field-hint"></p></form></details>' : '<p class="field-hint">选项和模式由房主修改。</p>') + '</section></aside></div></main>', 'spin');
+        '<section class="panel"><h2>房间成员</h2><p id="spin-members" translate="no" class="muted"></p>' + (data.room.isHost ? '<details id="spin-settings"><summary>房间设置 · 仅房主可编辑</summary><form class="stack-form" data-spin="save" data-version="' + data.room.version + '"><fieldset id="spin-edit-fields">' + inputs(data.room) + '<button class="secondary-button" type="submit">保存设置</button></fieldset><p id="spin-edit-hint" class="field-hint"></p></form></details>' : '<p class="field-hint">选项和模式由房主修改。</p>') + '</section></aside></div></main>', 'spin');
       wheelKey = ''; historyKey = ''; paint();
     }
     function wheelMotion(draw, count) {
@@ -98,7 +98,7 @@
         var a = point(i*step,196), b = point((i+1)*step,196), center = point((i+.5)*step,128);
         svg += '<path d="M200 200 L' + a.join(' ') + ' A196 196 0 ' + (step > 180 ? 1 : 0) + ' 1 ' + b.join(' ') + ' Z" fill="' + colors[i%colors.length] + '" stroke="#fff" stroke-width="2"/>';
         var label = options.length > 14 ? String(i+1) : Array.from(text).slice(0,8).join('') + (Array.from(text).length > 8 ? '…' : '');
-        svg += '<text x="' + center[0] + '" y="' + center[1] + '" text-anchor="middle" dominant-baseline="middle" font-size="' + (options.length > 10 ? 12 : 15) + '" font-weight="650" fill="#263c33" transform="rotate(' + ((i+.5)*step) + ' ' + center.join(' ') + ')"><title>' + e(text) + '</title>' + e(label) + '</text>';
+        svg += '<text translate="no" x="' + center[0] + '" y="' + center[1] + '" text-anchor="middle" dominant-baseline="middle" font-size="' + (options.length > 10 ? 12 : 15) + '" font-weight="650" fill="#263c33" transform="rotate(' + ((i+.5)*step) + ' ' + center.join(' ') + ')"><title>' + e(text) + '</title>' + e(label) + '</text>';
       });
       document.getElementById('spin-wheel').innerHTML = '<div class="spin-disc">' + svg + '</svg></div>';
       if (draw && draw.options.join('\n') === options.join('\n')) {
@@ -131,17 +131,17 @@
       document.getElementById('spin-room-title').textContent = data.room.title;
       document.getElementById('spin-mode-label').textContent = mode(data.room.mode);
       document.getElementById('spin-members').textContent = (data.members || []).join(' · ');
-      document.getElementById('spin-result').innerHTML = busy ? '<span>正在转动，让惊喜再等一下…</span>' : draw ? '<span>' + (data.room.mode === 'shared' ? e(draw.actor) + ' 抽中了' : '你抽中了') + '</span><strong>' + e(draw.result) + '</strong>' : '<span>下一步会是什么？</span><strong>转一下，揭晓答案</strong>';
+      document.getElementById('spin-result').innerHTML = busy ? '<span>正在转动，让惊喜再等一下…</span>' : draw ? '<span>' + (data.room.mode === 'shared' ? u(draw.actor) + ' 抽中了' : '你抽中了') + '</span><strong>' + u(draw.result) + '</strong>' : '<span>下一步会是什么？</span><strong>转一下，揭晓答案</strong>';
       var button = document.getElementById('spin-draw-button'); button.disabled = Boolean(busy || pending); button.textContent = busy ? '旋转中…' : pending ? '正在保存抽取…' : sessionStorage.getItem(pendingKey()) ? '重试这次抽取' : '旋转转盘';
       document.getElementById('spin-explainer').textContent = data.room.mode === 'shared' ? '一人发起，大家共享这一次结果。' : '各自旋转，所有结果都保存在共享历史中。';
       document.getElementById('spin-option-count').textContent = '（' + data.room.options.length + '）';
       var list = document.getElementById('spin-option-list'), listKey = JSON.stringify(data.room.options);
-      if (list.dataset.key !== listKey) { list.innerHTML = data.room.options.map(function (text,i) { return '<li><span style="background:'+colors[i%colors.length]+'">'+(i+1)+'</span>'+e(text)+'</li>'; }).join(''); list.dataset.key = listKey; }
+      if (list.dataset.key !== listKey) { list.innerHTML = data.room.options.map(function (text,i) { return '<li translate="no"><span style="background:'+colors[i%colors.length]+'">'+(i+1)+'</span>'+e(text)+'</li>'; }).join(''); list.dataset.key = listKey; }
       var visible = history.filter(function (d) { return !spinning(d); }), nextKey = JSON.stringify(visible);
       if (historyKey !== nextKey) {
         var opened = Array.from(document.querySelectorAll('#spin-history details[open]')).map(function (n) { return n.dataset.id; });
         document.getElementById('spin-history').innerHTML = visible.length ? visible.map(function (d) {
-          return '<article class="spin-history-item"><span class="spin-history-dot" aria-hidden="true"></span><div><strong>' + e(d.result) + '</strong><p>' + e(d.actor) + ' · ' + mode(d.mode) + '</p><time datetime="' + e(d.startedAt) + '">' + e(time(d.startedAt)) + '</time><details data-id="' + e(d.id) + '"' + (opened.includes(d.id) ? ' open' : '') + '><summary>当时的选项</summary><p>' + d.options.map(e).join(' · ') + '</p></details></div></article>';
+          return '<article class="spin-history-item"><span class="spin-history-dot" aria-hidden="true"></span><div><strong>' + u(d.result) + '</strong><p>' + u(d.actor) + ' · ' + mode(d.mode) + '</p>' + window.FriendsI18n.dateHtml(d.startedAt,'spin') + '<details data-id="' + e(d.id) + '"' + (opened.includes(d.id) ? ' open' : '') + '><summary>当时的选项</summary><p>' + d.options.map(u).join(' · ') + '</p></details></div></article>';
         }).join('') : '<p class="spin-empty">还没有完成的抽取。<br>转动一次，留下第一个选择。</p>';
         historyKey = nextKey;
       }

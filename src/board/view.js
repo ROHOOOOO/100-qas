@@ -27,7 +27,7 @@
    }else{
     svg='<svg viewBox="0 0 '+(w+1)*100+' '+(h+1)*100+'" aria-hidden="true">';for(let y=1;y<=h;y++)svg+='<path d="M100 '+y*100+' H'+w*100+'"/>';
     for(let x=1;x<=w;x++)svg+='<path d="M'+x*100+' 100 V'+(kind==='xiangqi'&&x>1&&x<9?'500 M'+x*100+' 600 V':'')+h*100+'"/>';
-    if(kind==='xiangqi')svg+='<path d="M400 100 L600 300 M600 100 L400 300 M400 800 L600 1000 M600 800 L400 1000"/><text x="320" y="563">楚 河</text><text x="680" y="563">漢 界</text>';
+    if(kind==='xiangqi')svg+='<path d="M400 100 L600 300 M600 100 L400 300 M400 800 L600 1000 M600 800 L400 1000"/><text translate="no" x="320" y="563">楚 河</text><text translate="no" x="680" y="563">漢 界</text>';
     else for(const [x,y]of[[4,4],[12,4],[8,8],[4,12],[12,12]])svg+='<circle cx="'+x*100+'" cy="'+y*100+'" r="9"/>';svg+='</svg>';
    }
   }
@@ -40,7 +40,7 @@
    const label=coordinate(kind,i)+(p?' '+sideName(kind,kind==='halma'?p:Math.sign(p))+(glyph||'棋子'):' 空位');
    const cls='board-cell '+(p?'occupied side-'+(p>0?'plus':'minus'):'empty')+(i===selected||path.at(-1)===i?' selected':'')+(targets.includes(i)?' target':'')+(last?.to===i?' last-move':'')+(check&&p===s.turn?' in-check':'');
    const style='left:'+x+'%;top:'+y+'%;width:'+width+'%;height:'+height+'%;'+(kind==='halma'?'--piece-color:'+(colors[p-1]||'#decfab')+';':'');
-   return '<'+(interactive?'button type="button"':'span')+' class="'+cls+'" style="'+style+'" data-board="cell" data-index="'+i+'" aria-label="'+label+'"><span>'+glyph+'</span></'+(interactive?'button':'span')+'>';
+   return '<'+(interactive?'button type="button"':'span')+' class="'+cls+'" style="'+style+'" data-board="cell" data-index="'+i+'" aria-label="'+label+'"><span translate="no">'+glyph+'</span></'+(interactive?'button':'span')+'>';
   }).join('');return '<div class="chess-board '+kind+'" role="group" aria-label="棋盘">'+svg+cells+'</div>';
  }
  function flight(s,interactive){

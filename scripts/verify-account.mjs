@@ -31,7 +31,7 @@ async function chineseAnswer(page, selector, value) {
 }
 async function run(local) {
   const url = base + '/' + (local ? '?backend=local' : '');
-  const context = await browser.newContext({ viewport: { width: 1365, height: 950 } });
+  const context = await browser.newContext({locale:'zh-CN', viewport: { width: 1365, height: 950 } });
   const page = await context.newPage();
   let expectRevocation = false;
   function health(p) {
@@ -114,7 +114,7 @@ async function run(local) {
     await page.locator('#spin-draw-button').click();
     await page.waitForFunction(() => document.querySelectorAll('.spin-history-item').length === 2);
     assert((await page.locator('.spin-history-item').first().innerText()).includes('晚风'));
-    const otherContext = local ? context : await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const otherContext = local ? context : await browser.newContext({locale:'zh-CN', viewport: { width: 390, height: 844 } });
     const other = await otherContext.newPage(); health(other);
     if (local) { await other.goto(url+'#account'); await other.getByRole('heading', { name: '我的记录' }).waitFor(); }
     else await login(other, url, account, password);

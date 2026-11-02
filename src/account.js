@@ -31,7 +31,7 @@
         '<p class="account-error" role="alert" hidden></p><button class="primary-button" type="submit">' + label + '</button></fieldset></form>';
     }
     function shell(title, lead, content) {
-      document.title = title + ' | Friends Games';
+      window.FriendsI18n.title( title + ' | Friends Games');
       api.shell('<main class="account-layout"><section class="panel account-panel account-access"><p class="eyebrow">Your place to play</p><h1>' + title + '</h1><p class="muted">' + lead + '</p>' + notice() + content + '</section></main>', 'account');
     }
     function login() {
@@ -52,7 +52,7 @@
       var user = api.account();
       shell('账号设置', '所有功能共用账号，游戏中统一展示你的用户名。',
         '<a class="account-back" href="#account">← 我的记录</a>' +
-        '<p class="account-login-id">登录账号：<strong>' + e(user.username) + '</strong></p>' +
+        '<p class="account-login-id">登录账号：<strong>' + window.FriendsI18n.user(user.username) + '</strong></p>' +
         form('profile', nameField(user.displayName), '保存用户名') +
         '<p class="field-hint">更新后，房间里的当前名称和新记录使用新用户名。已有历史保留当时的名称。</p>');
     }

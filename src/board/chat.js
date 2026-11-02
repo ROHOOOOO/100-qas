@@ -6,7 +6,7 @@
   function markRead(){unread=0;localStorage.setItem(key('read'),String(rows.at(-1)?.id||0));badge();}
   function badge(){if(node)node.querySelector('.board-chat-unread').textContent=unread?' · '+unread+' 条未读':'';}
   function paint(older=false){if(!node)return;const list=node.querySelector('.board-chat-list'),bottom=nearBottom(),height=list.scrollHeight,top=list.scrollTop;
-   list.innerHTML=rows.length?rows.map(m=>'<article class="board-chat-message '+(m.accountId===api.account().id?'mine':'')+'"><header><strong>'+e(m.name)+'</strong><time>'+e(new Date(m.createdAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}))+'</time></header><p>'+e(m.text)+'</p></article>').join(''):'<p class="muted">发一句话，和朋友聊聊吧。</p>';
+   list.innerHTML=rows.length?rows.map(m=>'<article class="board-chat-message '+(m.accountId===api.account().id?'mine':'')+'"><header><strong>'+root.FriendsI18n.user(m.name)+'</strong>'+root.FriendsI18n.dateHtml(m.createdAt,'chat')+'</header><p>'+root.FriendsI18n.user(m.text)+'</p></article>').join(''):'<p class="muted">发一句话，和朋友聊聊吧。</p>';
    node.querySelector('[data-chat="older"]').hidden=!hasOlder||!rows.length;
    if(older)list.scrollTop=top+list.scrollHeight-height;else if(bottom&&opened()){list.scrollTop=list.scrollHeight;markRead();}
    badge();

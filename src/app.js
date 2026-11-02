@@ -44,7 +44,9 @@
     afterLogin: returnAfterLogin, local: function () { return !isSupabaseMode(); } });
   var spin = window.createSpinModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
   var boardGames = window.createBoardModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
+  var wordMeet = window.createWordsModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
   var games = [
+    { id: "words", title: "同词相遇", description: "两个人，从不同的词出发，一轮轮联想，直到想到同一个词。", action: "open-words", cta: "进入同词相遇", meta: "双人默契游戏" },
     { id: "board", title: "Board Games", description: "五子棋、中国象棋、国际象棋、飞行棋和跳棋，与朋友或电脑对弈，边玩边聊，逐步回看每一局。", action: "open-board", cta: "进入棋类大厅", meta: "好友与电脑对战" },
     {
       id: "qa",
@@ -217,7 +219,7 @@
   function requireLogin() {
     if (isLoggedIn()) return true;
     var target = window.location.hash.slice(1);
-    if (/^(qa|room|create|tycoon|spin|board)(\/|$)/.test(target)) sessionStorage.setItem('friends-games-return-to', target);
+    if (/^(qa|room|create|tycoon|spin|board|words)(\/|$)/.test(target)) sessionStorage.setItem('friends-games-return-to', target);
     setRoute('account');
     return false;
   }
@@ -226,7 +228,7 @@
     var target = sessionStorage.getItem('friends-games-return-to');
     sessionStorage.removeItem('friends-games-return-to');
     authLastRefresh = Date.now();
-    if (target && /^(qa|room|create|tycoon|spin|board)(\/|$)/.test(target)) setRoute(target);
+    if (target && /^(qa|room|create|tycoon|spin|board|words)(\/|$)/.test(target)) setRoute(target);
     else render();
   }
 
@@ -607,8 +609,10 @@
       '    <button class="' + (activeGame === "tycoon" ? "is-active" : "") + '" data-action="open-tycoon" type="button">Friends Tycoon</button>',
       '    <button class="' + (activeGame === "spin" ? "is-active" : "") + '" data-action="open-spin" type="button">What’s Next?</button>',
       '    <button class="' + (activeGame === "board" ? "is-active" : "") + '" data-action="open-board" type="button">Board Games</button>',
+      '    <button class="' + (activeGame === 'words' ? 'is-active' : '') + '" data-action="open-words" type="button" translate="no">同词相遇</button>',
       '    <button class="' + (activeGame === "account" ? "is-active" : "") + '" data-action="open-account" type="button">' + escapeHtml(isLoggedIn() ? "我的记录" : "登录") + '</button>',
       '  </nav>',
+      window.FriendsI18n.control(),
       '</header>'
     ].join("");
   }
@@ -650,6 +654,12 @@
     return getRoomPlayers(room).filter(function (player) {
       return Boolean(player.submittedAt);
     }).length;
+  }
+
+  function userHtml(value) { return window.FriendsI18n.user(value); }
+
+  function questionHtml(question, index, bank) {
+    return window.FriendsI18n.questionHtml(question, index, bank);
   }
 
   function escapeHtml(value) {
@@ -1379,6 +1389,7 @@
     var sequence = ++renderSequence;
     spin.stop();
     boardGames.stop();
+    wordMeet.stop();
     await ensureFreshAuthSession();
     if (sequence !== renderSequence) return;
     var state = loadState();
@@ -1391,9 +1402,10 @@
       setTycoonPolling("");
     }
 
-    if (/^(qa|room|create|tycoon|spin|board)$/.test(pageName) && !requireLogin()) {
+    if (/^(qa|room|create|tycoon|spin|board|words)$/.test(pageName) && !requireLogin()) {
       await renderAccountPage(); return;
     }
+    if (pageName === "words") { await wordMeet.render(parts[1], parts[2]); return; }
     if (pageName === "board") { await boardGames.render(parts[1], parts[2]); return; }
     if (pageName === "spin") { await spin.render(parts[1] === 'room' ? parts[2] : null); return; }
     if (pageName === "qa") {
@@ -1491,7 +1503,7 @@
   }
 
   function renderGameLobby() {
-    document.title = "Friends Games";
+    window.FriendsI18n.title( "Friends Games");
     renderShell([
       '<main class="lobby-layout">',
       '  <section class="lobby-intro">',
@@ -1599,15 +1611,17 @@
       var records = localAccountRecords();
       records.spin = await supabaseRpc('spin_records', withAccountToken({}));
       records.board = await supabaseRpc('board_records', withAccountToken({}));
+      records.words = await supabaseRpc('words_records', withAccountToken({})).catch(function () { return null; });
       return records;
     }
     accountRecordsCache = await supabaseRpc("account_get_records", withAccountToken({}));
     accountRecordsCache.board = await supabaseRpc("board_records", withAccountToken({}));
+    if (accountRecordsCache) accountRecordsCache.words = await supabaseRpc('words_records', withAccountToken({})).catch(function () { return null; });
     return accountRecordsCache || { qa: [], tycoon: [] };
   }
 
   async function renderAccountPage() {
-    document.title = "我的记录 | Friends Games";
+    window.FriendsI18n.title( "我的记录 | Friends Games");
 
     if (accountUI.render(getHashParts()[1] || '')) return;
 
@@ -1628,7 +1642,7 @@
       '  <section class="panel account-panel">',
       '    <p class="eyebrow">Account</p>',
       '    <h1>我的记录</h1>',
-      '    <p class="muted">' + escapeHtml(accountLabel()) + '</p>',
+      '    <p class="muted">' + userHtml(accountLabel()) + '</p>',
       '    <div class="dialog-actions">',
       '      <a class="secondary-button" href="#account/settings">账号设置</a>',
       isSupabaseMode() && bindCount ? '      <button class="primary-button" data-action="account-bind-device" type="button">绑定这台设备里的 ' + bindCount + ' 条匿名记录</button>' : "",
@@ -1657,6 +1671,8 @@
       spin.records(records.spin || []),
       '  </div><div class="account-record-section"><h2>Board Games</h2>',
       boardGames.records(records.board),
+      '  </div><div class="account-record-section"><h2 translate="no">同词相遇</h2>',
+      wordMeet.records(records.words),
       '  </div>',
       '</section>'
     ].join("");
@@ -1671,7 +1687,7 @@
           '<article class="account-record-card">',
           '  <div>',
           '    <strong>Room ' + escapeHtml(record.roomCode || record.room_code) + '</strong>',
-          '    <p>' + escapeHtml(record.nickname || "未命名") + ' · ' + Number(record.questionCount || record.question_count || 0) + ' 题 · ' + (record.submittedAt || record.submitted_at ? "已提交" : "未提交") + '</p>',
+          '    <p>' + userHtml(record.nickname || "未命名") + ' · ' + Number(record.questionCount || record.question_count || 0) + ' 题 · ' + (record.submittedAt || record.submitted_at ? "已提交" : "未提交") + '</p>',
           '  </div>',
           '  <button class="small-button" data-action="open-room" data-code="' + escapeHtml(record.roomCode || record.room_code) + '" type="button">进入</button>',
           '</article>'
@@ -1690,7 +1706,7 @@
           '<article class="account-record-card">',
           '  <div>',
           '    <strong>Room ' + escapeHtml(record.roomCode || record.room_code) + '</strong>',
-          '    <p>' + escapeHtml(record.nickname || "未命名") + ' · ' + escapeHtml(tycoonStatusText(record.status)) + ' · ' + escapeHtml(tycoonPlayerStatusText(record.playerStatus || record.player_status)) + '</p>',
+          '    <p>' + userHtml(record.nickname || "未命名") + ' · ' + escapeHtml(tycoonStatusText(record.status)) + ' · ' + escapeHtml(tycoonPlayerStatusText(record.playerStatus || record.player_status)) + '</p>',
           '  </div>',
           '  <button class="small-button" data-action="open-tycoon-room" data-code="' + escapeHtml(record.roomCode || record.room_code) + '" type="button">进入</button>',
           '</article>'
@@ -1701,7 +1717,7 @@
   }
 
   function renderQaHome(state) {
-    document.title = "100 Q&As | Friends Games";
+    window.FriendsI18n.title( "100 Q&As | Friends Games");
     var recentRooms = Object.keys(state.rooms).map(function (id) {
       return state.rooms[id];
     }).filter(function (room) { return isSupabaseMode() || Boolean(getCurrentPlayer(room)) || room.ownerAccountId === getAuthUser().id; }).sort(function (a, b) {
@@ -1734,7 +1750,7 @@
   }
 
   function renderTycoonHome() {
-    document.title = "Friends Tycoon | Friends Games";
+    window.FriendsI18n.title( "Friends Tycoon | Friends Games");
     var state = loadTycoonState();
     var recentRooms = Object.keys(state.rooms || {}).map(function (id) {
       return state.rooms[id];
@@ -1752,7 +1768,7 @@
       '    <section class="panel tycoon-setup-panel">',
       '      <h2>创建房间</h2>',
       '      <form class="stack-form" data-action="tycoon-create-room">',
-      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
+      '<p class="field-hint">使用用户名 <strong>' + userHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '        <label>选择颜色</label>',
       renderTycoonColorPicker("colorId", 0, null, null),
       '        <label for="tycoon-victory-mode">胜利条件</label>',
@@ -1770,7 +1786,7 @@
       '      <form class="stack-form" data-action="tycoon-join-code">',
       '        <label for="tycoon-room-code">房间码</label>',
       '        <input id="tycoon-room-code" name="roomCode" maxlength="8" autocomplete="off" placeholder="例如 T8K2RA">',
-      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
+      '<p class="field-hint">使用用户名 <strong>' + userHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '        <label>选择颜色</label>',
       renderTycoonColorPicker("colorId", 1, null, null),
       '        <button class="secondary-button" type="submit">加入游戏</button>',
@@ -1851,7 +1867,7 @@
 
     room = normalizeTycoonRoom(room);
     tycoonLastRoomSignature = getTycoonRoomSignature(room);
-    document.title = "Room " + room.code + " | Friends Tycoon";
+    window.FriendsI18n.title( "Room " + room.code + " | Friends Tycoon");
     var player = getTycoonCurrentPlayer(room);
 
     renderShell([
@@ -1870,7 +1886,7 @@
   }
 
   function renderTycoonMissingRoom(code) {
-    document.title = "Friends Tycoon | Friends Games";
+    window.FriendsI18n.title( "Friends Tycoon | Friends Games");
     renderShell([
       '<main class="narrow-layout">',
       '  <section class="panel">',
@@ -1888,7 +1904,7 @@
       '<section class="panel tycoon-inline-join">',
       '  <h2>加入这局 Friends Tycoon</h2>',
       '  <form class="inline-join-form" data-action="tycoon-join-room" data-room-code="' + escapeHtml(room.code) + '">',
-      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
+      '<p class="field-hint">使用用户名 <strong>' + userHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       renderTycoonColorPicker("colorId", null, room, null),
       '    <button class="primary-button" type="submit">加入</button>',
       '  </form>',
@@ -1919,6 +1935,7 @@
       '    <p class="muted">' + escapeHtml(tycoonStatusText(room.status)) + ' · 第 ' + Number(room.currentTurn || 1) + ' 回合 · ' + escapeHtml(tycoonVictoryText(room)) + '</p>',
       '  </div>',
       '  <div class="tycoon-room-tools">',
+      '<div class="tycoon-mobile-language">' + window.FriendsI18n.control() + '</div>',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-tycoon-link" type="button">↗</button>',
       '    <button class="secondary-button" data-action="open-tycoon-rules" type="button">游戏规则</button>',
       canExit ? '    <button class="secondary-button" data-action="tycoon-exit" type="button">退出游戏</button>' : "",
@@ -1991,7 +2008,7 @@
           playersHere.length ? [
           '  <div class="tycoon-tokens">',
           playersHere.map(function (player) {
-            return '<b title="' + escapeHtml(player.nickname) + '" style="' + escapeHtml(tycoonPlayerStyle(room, player.id)) + '">' + escapeHtml(player.nickname.slice(0, 1)) + '</b>';
+            return '<b translate="no" title="' + escapeHtml(player.nickname) + '" style="' + escapeHtml(tycoonPlayerStyle(room, player.id)) + '">' + escapeHtml(player.nickname.slice(0, 1)) + '</b>';
           }).join(""),
           '  </div>'
           ].join("") : "",
@@ -2099,7 +2116,7 @@
       '    <b>' + escapeHtml(cell.name) + '</b>',
       '    <dl>',
       rows.map(function (row) {
-        return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(row[1]) + '</dd></div>';
+        return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + (row[0] === "状态" && owner ? userHtml(owner.nickname) + " · Lv." + property.level : escapeHtml(row[1])) + '</dd></div>';
       }).join(""),
       '    </dl>',
       rentRows
@@ -2125,8 +2142,8 @@
     return [
       '<section class="tycoon-action-panel">',
       '  <div>',
-      '    <h2>' + (currentTurnPlayer ? escapeHtml(currentTurnPlayer.nickname) + ' 的回合' : '当前回合') + '</h2>',
-      '    <p class="muted">' + escapeHtml(waitingCopy) + '</p>',
+      '    <h2>' + (currentTurnPlayer ? userHtml(currentTurnPlayer.nickname) + ' 的回合' : '当前回合') + '</h2>',
+      '    <p class="muted">' + (currentTurnPlayer && room.status === "active" ? "现在是 " + userHtml(currentTurnPlayer.nickname) + " 的回合。" : escapeHtml(waitingCopy)) + '</p>',
       room.lastDice ? '    <div class="dice-result">骰子 ' + Number(room.lastDice) + '</div>' : "",
       renderTycoonLandingGuide(room, player),
       room.pendingAction ? [
@@ -2172,9 +2189,9 @@
 
     return [
       '<div class="tycoon-position-card">',
-      '  <span>' + escapeHtml(focusPlayer.nickname) + ' 当前在</span>',
+      '  <span>' + userHtml(focusPlayer.nickname) + ' 当前在</span>',
       '  <strong>' + escapeHtml(cell.name) + '</strong>',
-      '  <small>' + escapeHtml(ownerCopy) + ' · ' + escapeHtml(moneyCopy) + '</small>',
+      '  <small>' + (owner && owner.id !== focusPlayer.id ? userHtml(owner.nickname) + " 的地块" : escapeHtml(ownerCopy)) + ' · ' + escapeHtml(moneyCopy) + '</small>',
       '</div>'
     ].join("");
   }
@@ -2194,7 +2211,7 @@
         return [
           '<div class="tycoon-player-row' + (isCurrent ? " is-current" : "") + (isTurn ? " is-turn" : "") + '" style="' + escapeHtml(tycoonPlayerStyle(room, player.id)) + '">',
           '  <div>',
-          '    <strong>' + escapeHtml(player.nickname) + (isTycoonHost(room, player) ? ' <span>房主</span>' : '') + '</strong>',
+          '    <strong>' + userHtml(player.nickname) + (isTycoonHost(room, player) ? ' <span>房主</span>' : '') + '</strong>',
           '    <small>' + escapeHtml(tycoonPlayerStatusText(player.status)) + ' · ' + escapeHtml(getTycoonCell(player.position).name) + '</small>',
           canChangeColor ? renderTycoonColorButtons(room, player) : "",
           '  </div>',
@@ -2217,10 +2234,10 @@
     return [
       '<section class="tycoon-final-results">',
       '  <h2>最终结果</h2>',
-      '  <p class="muted">胜利者：' + escapeHtml(finalResults.winnerName || "暂无") + '</p>',
+      '  <p class="muted">胜利者：' + (finalResults.winnerName ? userHtml(finalResults.winnerName) : "暂无") + '</p>',
       '  <ol>',
       (finalResults.results || []).map(function (result) {
-        return '<li><strong>' + escapeHtml(result.nickname) + '</strong><span>现金 ' + formatMoney(result.cash) + ' · 净值 ' + formatMoney(result.netWorth) + '</span></li>';
+        return '<li><strong>' + userHtml(result.nickname) + '</strong><span>现金 ' + formatMoney(result.cash) + ' · 净值 ' + formatMoney(result.netWorth) + '</span></li>';
       }).join(""),
       '  </ol>',
       '</section>'
@@ -2234,7 +2251,7 @@
       '  <h2>游戏动态</h2>',
       '  <div class="tycoon-log-list">',
       logs.length ? logs.slice(0, 40).map(function (log) {
-        return '<p class="tycoon-log-item tycoon-log-' + escapeHtml(log.kind || "info") + '"><span>' + escapeHtml(formatTime(log.createdAt)) + '</span>' + escapeHtml(log.message) + '</p>';
+        return '<p class="tycoon-log-item tycoon-log-' + escapeHtml(log.kind || "info") + '"><span>' + escapeHtml(formatTime(log.createdAt)) + '</span>' + window.FriendsI18n.logHtml(log.message) + '</p>';
       }).join("") : '<p class="muted">还没有游戏记录。</p>',
       '  </div>',
       '</section>'
@@ -2251,8 +2268,8 @@
       messages.length ? messages.map(function (message) {
         return [
           '<div class="tycoon-message' + (player && message.playerId === player.id ? " is-me" : "") + '">',
-          '  <strong>' + escapeHtml(message.nickname) + '</strong>',
-          '  <p>' + escapeHtml(message.content) + '</p>',
+          '  <strong>' + userHtml(message.nickname) + '</strong>',
+          '  <p>' + userHtml(message.content) + '</p>',
           '</div>'
         ].join("");
       }).join("") : '<p class="muted">聊天只保留当前局最近消息。</p>',
@@ -2273,7 +2290,7 @@
       '<aside class="tycoon-side-panel panel" data-mobile-tab="' + escapeHtml(sideTab) + '">',
       '  <section class="tycoon-turn-card" style="' + escapeHtml(turnStyle) + '">',
       '    <span>当前回合</span>',
-      '    <strong>' + escapeHtml(currentTurnPlayer ? currentTurnPlayer.nickname : tycoonStatusText(room.status)) + '</strong>',
+      '    <strong>' + (currentTurnPlayer ? userHtml(currentTurnPlayer.nickname) : escapeHtml(tycoonStatusText(room.status))) + '</strong>',
       '    <small>' + (currentTurnPlayer ? '现金 ' + formatMoney(currentTurnPlayer.cash) + ' · 第 ' + Number(room.currentTurn || 1) + ' 回合' : escapeHtml(tycoonVictoryText(room))) + '</small>',
       room.turnPhase === "roll" && currentTurnPlayer ? '    <p>等待掷骰，不会自动掷骰。</p>' : "",
       room.pendingAction ? '    <p>等待' + escapeHtml(tycoonPendingActionText(room.pendingAction)) + '，<span data-tycoon-countdown>' + getTycoonActionRemainingSeconds(room) + ' 秒</span>后默认跳过。</p>' : "",
@@ -2302,7 +2319,7 @@
       '<aside class="tycoon-mobile-sheet' + (tycoonMobileSheetExpanded ? " is-expanded" : "") + '" data-mobile-tab="' + escapeHtml(activeTab) + '">',
       '  <button class="tycoon-sheet-handle" data-action="tycoon-toggle-sheet" type="button" aria-expanded="' + (tycoonMobileSheetExpanded ? "true" : "false") + '">',
       '    <span></span>',
-      '    <strong style="' + escapeHtml(turnStyle) + '">' + escapeHtml(currentTurnPlayer ? currentTurnPlayer.nickname + " 的回合" : tycoonStatusText(room.status)) + '</strong>',
+      '    <strong style="' + escapeHtml(turnStyle) + '">' + (currentTurnPlayer ? userHtml(currentTurnPlayer.nickname) + " 的回合" : escapeHtml(tycoonStatusText(room.status))) + '</strong>',
       '    <small>' + (room.pendingAction ? getTycoonActionRemainingSeconds(room) + ' 秒后默认跳过' : (currentTurnPlayer ? '第 ' + Number(room.currentTurn || 1) + ' 回合' : escapeHtml(tycoonVictoryText(room)))) + '</small>',
       '  </button>',
       '  <div class="tycoon-mobile-primary">',
@@ -2352,6 +2369,7 @@
   }
 
   function renderCreateRoom() {
+    window.FriendsI18n.title("创建房间 | 100 Q&As");
     var selectedQuestions = getSelectedCreateQuestions();
     var isDefault = createRoomDraft.mode === "default";
     var previewQuestions = selectedQuestions.slice(0, 3);
@@ -2382,7 +2400,7 @@
       previewQuestions.length ? [
       '        <ol data-question-preview>',
       previewQuestions.map(function (question) {
-        return '          <li>' + escapeHtml(question) + '</li>';
+        return '          <li>' + questionHtml(question, selectedQuestions.indexOf(question), selectedQuestions) + '</li>';
       }).join(""),
       '        </ol>'
       ].join("") : '        <ol data-question-preview></ol>',
@@ -2417,6 +2435,7 @@
   }
 
   function renderRoom(state, code) {
+    window.FriendsI18n.title("Room " + code + " | 100 Q&As");
     var room = getRoomByCode(state, code);
     if (!room) {
       renderMissingRoom(code);
@@ -2460,7 +2479,7 @@
       '    <h1>加入这局 100 Q&As</h1>',
       '    <p class="muted">加入后即可开始答题，房间中展示你的用户名。</p>',
       '    <form class="stack-form" data-action="join-room" data-room-id="' + escapeHtml(room.id) + '">',
-      '<p class="field-hint">使用用户名 <strong>' + escapeHtml(accountLabel()) + '</strong> 参与游戏。</p>',
+      '<p class="field-hint">使用用户名 <strong>' + userHtml(accountLabel()) + '</strong> 参与游戏。</p>',
       '      <button class="primary-button" type="submit">开始答题</button>',
       '    </form>',
       existingPlayers.length ? renderLocalPlayers(room, null) : "",
@@ -2488,7 +2507,7 @@
         return [
           '<article class="question-card">',
           '  <div class="question-number">Q' + number + '</div>',
-          '  <label for="answer-' + number + '">' + escapeHtml(question) + '</label>',
+          '  <label for="answer-' + number + '">' + questionHtml(question, roomQuestions.indexOf(question), roomQuestions) + '</label>',
           '  <textarea id="answer-' + number + '" data-question="' + number + '" rows="4" placeholder="写下你的答案">' + escapeHtml(value) + '</textarea>',
           '</article>'
         ].join("");
@@ -2513,7 +2532,7 @@
       '<header class="room-header">',
       '  <div>',
       '    <p class="eyebrow">Room ' + escapeHtml(room.code) + '</p>',
-      '    <h1>' + escapeHtml(player.nickname) + ' 的 ' + roomQuestions.length + ' Q&As</h1>',
+      '    <h1>' + userHtml(player.nickname) + ' 的 ' + roomQuestions.length + ' Q&As</h1>',
       '  </div>',
       '  <div class="room-tools">',
       '    <button class="icon-button" title="复制邀请链接" aria-label="复制邀请链接" data-action="copy-link">↗</button>',
@@ -2559,7 +2578,7 @@
         return [
           '<div class="player-row' + (isCurrent ? " is-current" : "") + '">',
           '  <div>',
-          '    <strong>' + escapeHtml(player.nickname) + '</strong>',
+          '    <strong>' + userHtml(player.nickname) + '</strong>',
           '    <span data-player-status="' + escapeHtml(player.id) + '">' + status + '</span>',
           '  </div>',
           isCurrent
@@ -2600,14 +2619,14 @@
           '<article class="result-card">',
           '  <div class="result-question">',
           '    <span>Q' + number + '</span>',
-          '    <h2>' + escapeHtml(question) + '</h2>',
+          '    <h2>' + questionHtml(question, roomQuestions.indexOf(question), roomQuestions) + '</h2>',
           '  </div>',
           submittedPlayers.map(function (submittedPlayer) {
             var answer = submittedPlayer.answers[String(number)] || "";
             return [
               '<div class="answer-row">',
-              '  <strong>' + escapeHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
-              '  <p>' + escapeHtml(answer) + '</p>',
+              '  <strong>' + userHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
+              '  <p>' + userHtml(answer) + '</p>',
               '</div>'
             ].join("");
           }).join(""),
@@ -2646,7 +2665,7 @@
       return;
     }
 
-    document.title = "Room " + room.code + " PDF | 100 Q&As";
+    window.FriendsI18n.title( "Room " + room.code + " PDF | 100 Q&As");
     renderShell([
       '<main class="pdf-export-layout">',
       '  <section class="pdf-toolbar panel">',
@@ -2673,12 +2692,12 @@
         var number = index + 1;
         return [
           '<section class="pdf-question">',
-          '  <h2>Q' + number + '. ' + escapeHtml(question) + '</h2>',
+          '  <h2>Q' + number + '. ' + questionHtml(question, roomQuestions.indexOf(question), roomQuestions) + '</h2>',
           submittedPlayers.map(function (submittedPlayer) {
             return [
               '<div class="pdf-answer">',
-              '  <strong>' + escapeHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
-              '  <p>' + escapeHtml(submittedPlayer.answers[String(number)] || "") + '</p>',
+              '  <strong>' + userHtml(submittedPlayer.submittedName || submittedPlayer.nickname) + '</strong>',
+              '  <p>' + userHtml(submittedPlayer.answers[String(number)] || "") + '</p>',
               '</div>'
             ].join("");
           }).join(""),
@@ -2704,7 +2723,7 @@
 
     return {
       room: room,
-      questions: getRoomQuestions(room),
+      questions: window.FriendsI18n.questionBank(getRoomQuestions(room)),
       submittedPlayers: getRoomPlayers(room).filter(function (item) {
         return Boolean(item.submittedAt);
       })
@@ -2770,7 +2789,7 @@
     function drawMeta(text) {
       ctx.font = "14px system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
       ctx.fillStyle = "#60706b";
-      cursorY = drawCanvasText(ctx, wrapCanvasText(ctx, text, contentWidth), margin, cursorY, 22) + 8;
+      cursorY = drawCanvasText(ctx, wrapCanvasText(ctx, window.FriendsI18n.text(text), contentWidth), margin, cursorY, 22) + 8;
     }
 
     startPage();
@@ -2778,7 +2797,7 @@
     ctx.fillStyle = "#1e2b27";
     cursorY = drawCanvasText(ctx, ["100 Q&As"], margin, cursorY, 42);
     drawMeta("Room " + room.code + " · " + roomQuestions.length + " 题 · " + submittedPlayers.length + " 位已提交玩家");
-    drawMeta("导出范围：所有已提交玩家的答案 · 生成时间：" + new Date().toLocaleString("zh-CN"));
+    drawMeta("导出范围：所有已提交玩家的答案 · 生成时间：" + window.FriendsI18n.dateText(new Date(), "spin"));
     cursorY += 12;
 
     roomQuestions.forEach(function (question, index) {
@@ -3064,7 +3083,7 @@
 
     if (preview) {
       preview.innerHTML = selectedQuestions.slice(0, 3).map(function (question) {
-        return "<li>" + escapeHtml(question) + "</li>";
+        return "<li>" + userHtml(question) + "</li>";
       }).join("");
     }
 
@@ -3313,7 +3332,7 @@
       '<section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="submit-title">',
       '  <p class="eyebrow">Submit answers</p>',
       '  <h2 id="submit-title">确认提交吗?</h2>',
-      '  <p>提交后，' + escapeHtml(player.nickname) + ' 的 ' + total + ' 个答案就会锁定，不能再修改。提交完成后可以查看同一房间里已提交朋友的答案。</p>',
+      '  <p>提交后，' + userHtml(player.nickname) + ' 的 ' + total + ' 个答案就会锁定，不能再修改。提交完成后可以查看同一房间里已提交朋友的答案。</p>',
       '  <div class="dialog-actions">',
       '    <button class="secondary-button" data-action="cancel-submit">再检查一下</button>',
       '    <button class="primary-button" data-action="confirm-submit">确认提交</button>',
@@ -3338,7 +3357,7 @@
       '<section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="tycoon-confirm-title">',
       '  <p class="eyebrow">Friends Tycoon</p>',
       '  <h2 id="tycoon-confirm-title">' + escapeHtml(title) + '</h2>',
-      '  <p>' + escapeHtml(message) + '</p>',
+      '  <p>' + window.FriendsI18n.logHtml(message) + '</p>',
       '  <div class="dialog-actions">',
       '    <button class="secondary-button" data-action="cancel-submit" type="button">先不操作</button>',
       '    <button class="primary-button" data-action="' + escapeHtml(confirmAction) + '"' + extraAttrs + ' type="button">' + escapeHtml(confirmLabel || "确认") + '</button>',
@@ -4072,6 +4091,7 @@
     if (action === "open-lobby") setRoute("home");
     if (action === "open-qa") setRoute("qa");
     if (action === "open-tycoon") setRoute("tycoon");
+    if (action === "open-words") { setRoute("words"); return; }
     if (action === "open-board") { setRoute("board"); return; }
     if (action === "open-spin") setRoute("spin");
     if (action === "retry-room") render();

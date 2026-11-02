@@ -4,9 +4,11 @@
 
 ## 文件索引
 
+- [word-meet-requirements.md](word-meet-requirements.md)：同词相遇的双人规则、计时、私密提交、历史与中断。
+
 - [board-games-requirements.md](board-games-requirements.md)：五种棋规则、电脑、多人数房间、托管、持续聊天及完整回放。
 
-- [product-requirements.md](product-requirements.md)：产品需求、用户流程、功能边界。
+- [product-requirements.md](product-requirements.md)：产品需求、用户流程、功能边界及三种语言规则。
 - [question-bank.md](question-bank.md)：100 个问题的正式题库。
 - [whats-next-requirements.md](whats-next-requirements.md)：What’s Next? 已确认需求、两种抽取模式、共享历史及统一登录规则（已于 2026-10-06 发布）。
 - [friends-tycoon-requirements.md](friends-tycoon-requirements.md)：Friends Tycoon 的已确认玩法、UI 和后续待确认项。

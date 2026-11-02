@@ -135,7 +135,7 @@ async function verifyOnlineTycoon(pageA, browser) {
   const roomCode = roomUrl.split("#tycoon/room/")[1];
   assert(Boolean(roomCode), "Tycoon room URL should include a room code.");
 
-  const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const contextB = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 } });
   const pageB = await contextB.newPage();
   collectPageHealth(pageB, "tycoon-player-b", health);
   await registerParticipant(pageB, "tycoon_b");
@@ -218,7 +218,7 @@ async function waitForAccountRecord(page, roomCode, label) {
 async function verifyOnlineAccount(browser) {
   const username = `acct${Date.now().toString(36).slice(-8)}`;
   const password = `pw${Date.now().toString(36).slice(-6)}`;
-  const contextA = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+  const contextA = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 }, acceptDownloads: true });
   const pageA = await contextA.newPage();
   collectPageHealth(pageA, "account-player-a", health);
 
@@ -265,7 +265,7 @@ async function verifyOnlineAccount(browser) {
   await waitForAccountRecord(pageA, qaRoomCode, "QA");
   await waitForAccountRecord(pageA, tycoonRoomCode, "Tycoon");
 
-  const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+  const contextB = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 }, acceptDownloads: true });
   const pageB = await contextB.newPage();
   collectPageHealth(pageB, "account-player-b", health);
 
@@ -307,7 +307,7 @@ const mobileScreenshot = join(tmpdir(), "100-qas-online-mobile.png");
 const health = { logs: [] };
 
 const browser = await launchBrowser(chromium);
-const contextA = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+const contextA = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 }, acceptDownloads: true });
 const pageA = await contextA.newPage();
 collectPageHealth(pageA, "player-a", health);
 
@@ -354,7 +354,7 @@ try {
   assert(await pageA.locator(".answer-row").count() === 3, "Player A should initially see one submitted answer per question.");
   assert(await pageA.getByText("线上自定义问题 3?").count() === 1, "Results should use the shorter custom online room question bank.");
 
-  const contextB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const contextB = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 } });
   const pageB = await contextB.newPage();
   collectPageHealth(pageB, "player-b", health);
   await registerParticipant(pageB, "player_b");
@@ -394,7 +394,7 @@ try {
 
   await pageA.screenshot({ path: resultScreenshot, fullPage: false });
 
-  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const mobileContext = await browser.newContext({locale:'zh-CN', viewport: { width: 390, height: 844 }, isMobile: true });
   const mobilePage = await mobileContext.newPage();
   collectPageHealth(mobilePage, "mobile-home", health);
   await mobilePage.goto(appUrl, { waitUntil: "domcontentloaded" });

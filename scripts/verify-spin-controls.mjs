@@ -24,7 +24,7 @@ async function angle(page) {
 }
 async function run(local) {
   const url = base + '/' + (local ? '?backend=local' : '');
-  const context = await browser.newContext({ viewport: { width: 1365, height: 950 } });
+  const context = await browser.newContext({locale:'zh-CN', viewport: { width: 1365, height: 950 } });
   const page = await context.newPage();
   let expectedNetworkFailure = false;
   page.on('pageerror', e => errors.push(e.message));

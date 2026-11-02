@@ -55,7 +55,7 @@ async function waitForToastsToClear(page) {
 }
 
 const browser = await launchBrowser();
-const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+const context = await browser.newContext({locale:'zh-CN', viewport: { width: 1280, height: 720 }, acceptDownloads: true });
 const page = await context.newPage();
 const consoleErrors = [];
 
@@ -330,7 +330,7 @@ try {
   assert(eventCellStyle.borderStyle.includes("dashed"), "Mobile event cells should use a dashed border.");
   await page.screenshot({ path: mobileTycoonRoomScreenshot, fullPage: false });
 
-  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const mobileContext = await browser.newContext({locale:'zh-CN', viewport: { width: 390, height: 844 }, isMobile: true });
   const mobilePage = await mobileContext.newPage();
   await mobilePage.goto(appUrl);
   await mobilePage.getByRole("heading", { name: "Friends Games" }).waitFor();
