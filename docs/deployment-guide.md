@@ -1,6 +1,17 @@
 # 上线与分享指南
 
-## 最新发布状态 · 2026-10-06
+## 最新发布状态 · 2026-11-02（11-03 复核）
+
+- 正式入口：[同词相遇](https://rohooooo.github.io/100-qas/#words)，全站三语界面一并上线。
+- 功能提交 `c9da3f130a59c3f2e8f997de66b0f95b17e74145`，GitHub Pages 构建成功；25 个网页文件与验收版本哈希一致。
+- Supabase 原项目已从暂停恢复为 `ACTIVE_HEALTHY`，地址及公开密钥不变。迁移 `20261102061800_add_word_meet_rooms_and_history` 已成功应用；原有账号、棋房保留。
+- 五个新 RPC 可访问并拒绝无效账号凭证；三张新表启用 RLS，客户端无直接查询权限，内部 bundle 函数不可调用。
+- 双账号正式验收：邀请加入、双方准备、单方词语在网络响应中不可见、共同揭晓、繁简词匹配、账号历史、三语切换、刷新与登录记忆、中断保密全部通过。
+- 测试房间 `B4F1F7` 成功相遇并保留两轮；`CAE218` 中断后未揭晓词已清除。11-03 只读复查确认这些结果仍保存。
+- 使用已有 Playwright/Chrome，Browser 插件不可用；桌面 1365×900 和手机尺寸 390×844 无横向溢出或应用错误。Safari、手机真机及独立 PostgreSQL 多连接压力测试未执行。
+- 之前各日期记录保留开发时状态，当前发布情况以本节为准。
+
+## 2026-10-06 发布记录
 
 - 正式网址：[Friends Games](https://rohooooo.github.io/100-qas/)。继续使用 GitHub Pages 的 `main` 分支根目录和既有 Supabase 项目。
 - 用户已恢复数据库并实际运行完整 `supabase/schema.sql`；新版账号、转盘、棋房和聊天接口已生效。
@@ -9,7 +20,7 @@
 - 桌面 1365×1000 与手机尺寸 390×844 验收通过；手机真机和 Safari 尚未验证。
 - 本地试玩与正式数据库相互独立，本地账号和记录不会自动上传。
 
-以下各日期记录保留对应阶段的发布过程；当前状态以上述 2026-10-06 记录为准。
+以下各日期记录保留对应阶段的发布过程；当前状态以本文顶部的最新发布记录为准。
 
 ## 当前推荐方式
 
@@ -333,17 +344,17 @@ PGLITE_MODULE_PATH=/tmp/friends-games-tests/node_modules/@electric-sql/pglite no
 - 域名根目录由独立仓库 `ROHOOOOO/rohooooo.github.io` 发布，本地目录为 `/Users/rohooooo/Developer/rohooooo.github.io`。
 - 2026-10-06 已确认两个地址均可访问、内容相同；微信后台校验结果需在平台内确认。若平台重新生成验证文件，两处都要同步更新。
 
-## 多语言前端更新（待发布）
+## 多语言前端更新（2026-11-02 已发布）
 
-2026-10-14/15 的语言功能仍为本地改动。发布时包含 `src/i18n.js`、`src/i18n-catalog.js`、更新后的 `index.html` 和游戏界面文件。没有 SQL 变更，无需重复迁移数据库。发布后检查三语首页、现有账号记录和默认题库，确保新增两个脚本均可加载。
+2026-10-14/15 的语言功能已随同词相遇发布。发布内容包含 `src/i18n.js`、`src/i18n-catalog.js`、更新后的 `index.html` 和游戏界面文件。没有 SQL 变更，无需重复迁移数据库。发布后检查三语首页、现有账号记录和默认题库，确保新增两个脚本均可加载。
 
-## 同词相遇更新（2026-11-02，待发布）
+## 同词相遇更新（2026-11-02 已发布）
 
-本次包含数据库变更，与上面的纯多语言更新不同。按以下顺序发布：
+本次包含数据库变更，与上面的纯多语言更新不同。已按以下顺序完成发布；后续重新部署可沿用：
 
 1. 已有账号/棋类项目在 Supabase SQL Editor **运行** `supabase/words.sql`；新项目运行完整 `supabase/schema.sql`。两者可重复执行，保留原数据。
 2. 确认五个接口存在：`words_create_room`、`words_get_room`、`words_action`、`words_history`、`words_records`。失败时事务回滚，先排查 SQL 再发布前端。
 3. 一起发布 `src/words/`、`licenses/word-meet-opencc.txt`、`src/local-backend.js`、`src/app.js`、`src/styles.css`、`src/i18n.js`、`src/i18n-catalog.js`、`index.html`，以及先前尚未发布的其他多语言改动。
 4. 用两个账号验收邀请、同时准备、单方词语不可见、双方揭晓、相同结束、刷新与记录；再验证原有功能。
 
-生产不需要 PGlite、OpenCC npm 包或新的服务器。PGlite 仅用于临时测试；OpenCC 的固定字符映射已随源代码附带并保留授权声明。本轮没有发布前端或修改正式数据库。
+生产不需要 PGlite、OpenCC npm 包或新的服务器。PGlite 仅用于临时测试；OpenCC 的固定字符映射已随源代码附带并保留授权声明。本功能已完成正式数据库升级与前端发布。
