@@ -46,7 +46,7 @@
   var boardGames = window.createBoardModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
   var wordMeet = window.createWordsModule({ rpc: function (name, data) { return supabaseRpc(name, withAccountToken(data)); }, shell: renderShell, escape: escapeHtml, toast: showToast, route: setRoute, account: getAuthUser });
   var games = [
-    { id: "words", title: "同词相遇", description: "两个人，从不同的词出发，一轮轮联想，直到想到同一个词。", action: "open-words", cta: "进入同词相遇", meta: "双人默契游戏" },
+    { id: "words", title: "同词相遇", description: "2–6 人，从不同的词出发，一轮轮联想，直到所有人想到同一个词。", action: "open-words", cta: "进入同词相遇", meta: "2–6 人默契游戏" },
     { id: "board", title: "Board Games", description: "五子棋、中国象棋、国际象棋、飞行棋和跳棋，与朋友或电脑对弈，边玩边聊，逐步回看每一局。", action: "open-board", cta: "进入棋类大厅", meta: "好友与电脑对战" },
     {
       id: "qa",

@@ -1,4 +1,4 @@
-// Starts an isolated SQL-backed site, then drives two independent browsers.
+// Starts an isolated SQL-backed site and drives independent accounts (two and six players).
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFileSync,existsSync} from 'node:fs';
@@ -26,7 +26,7 @@ const errors=[],shots=[];let expectedNetworkFailure=false;
 async function signup(locale,id,name,viewport){const ctx=await browser.newContext({locale,viewport}),page=await ctx.newPage();page.setDefaultTimeout(12000);page.on('pageerror',err=>errors.push(err.message));page.on('console',m=>{if(m.type()==='error'&&!expectedNetworkFailure)errors.push(m.text());});await page.goto(base+'/#words');await page.locator('#account-username').waitFor();await page.goto(base+'/#account/register');await page.locator('#account-username').fill(id);await page.locator('#account-display-name').fill(name);await page.locator('#account-password').fill('testpass123');await page.locator('#account-password-confirm').fill('testpass123');await page.locator('#account-security-answer').fill('安全中文');await page.locator('[data-account=register] button[type=submit]').click();await page.locator('#words-title').waitFor();return page;}
 async function shot(page,name){await page.evaluate(()=>scrollTo(0,0));const path=join(tmpdir(),name);await page.screenshot({path,fullPage:true});shots.push(path);}
 async function submit(page,word){await page.locator('#words-word').fill(word);await page.locator('[data-words-form=word] button').click();}
-async function ready(a,b){await a.locator('[data-words=ready]').click();await b.locator('[data-words=ready]').click();await a.locator('#words-word').waitFor();await b.locator('#words-word').waitFor();}
+async function ready(a,b){await a.locator('[data-words=ready]').click();await b.locator('[data-words=ready]').click();const start=a.locator('[data-words=start]');if(await start.count())await start.click();await a.locator('#words-word').waitFor();await b.locator('#words-word').waitFor();}
 try{
  const a=await signup('zh-CN','meet_a','登录',{width:1365,height:900}),b=await signup('en-US','meet_b','开始',{width:390,height:844});
  await shot(a,'word-meet-home-zh.png');await a.locator('#words-title').fill('相遇测试 <b>');await a.locator('[data-words-form=create] button[type=submit]').click();await a.waitForURL(/#words\/room/);const url=a.url(),code=url.split('/').at(-1);await a.locator('#words-stage').waitFor();assert((await a.title()).includes('同词相遇'));
@@ -44,6 +44,29 @@ try{
  assert.equal((await db.query('select count(*)::int n from words_rounds where room_code=$1 and revealed_at is not null',[code])).rows[0].n,3);
  await a.reload();await a.locator('.words-success').waitFor();await a.goto(base+'/#account');await a.locator('.account-record-section').filter({hasText:'同词相遇'}).getByText('相遇测试 <b>',{exact:true}).waitFor();assert.equal(await a.locator('strong b').count(),0);await a.locator('[data-language-select]').selectOption('en');await a.getByText('Rounds revealed: 3',{exact:true}).waitFor();await a.locator('[data-language-select]').selectOption('zh-CN');
  await a.goto(base+'/#words');await a.locator('[data-words-form=create] button[type=submit]').click();await a.waitForURL(/#words\/room/);await b.goto(a.url());await b.locator('[data-words=join]').click();await ready(a,b);await submit(a,'隐藏');await a.locator('.words-locked').waitFor();await b.locator('[data-words=interrupt]').click();await b.locator('[data-words=cancel-interrupt]').click();assert.equal(await b.locator('[role=dialog]').count(),0);await b.locator('[data-words=interrupt]').click();await b.locator('[data-words=confirm-interrupt]').click();await a.getByRole('heading',{name:'本局已中断'}).waitFor();assert(!(await a.locator('#words-stage').innerText()).includes('隐藏'));assert.equal(await b.locator('.words-history-round').count(),0);
+
+ // Six separate signed-in contexts: lobby, privacy barrier, partial agreement and all-player match.
+ const players=[a,b];
+ for(let i=2;i<7;i++)players.push(await signup(i===5?'zh-TW':'zh-CN','multi_'+i,i===4?'同名':i===3?'同名':'朋友'+i,{width:i===5?390:1365,height:i===5?844:900}));
+ await a.goto(base+'/#words');await a.locator('#words-title').fill('六人一起寻找同一个词');await a.locator('[data-words-form=create] button').click();await a.waitForURL(/#words\/room/);const multiUrl=a.url();
+ for(const p of players.slice(1,6)){await p.goto(multiUrl);await p.locator('[data-words=join]').click();await p.locator('#words-stage').waitFor();}
+ await a.locator('#words-member-count').filter({hasText:'6 / 6'}).waitFor();assert.equal(await a.locator('#words-players>div').count(),6);assert(await a.locator('[data-words=start]').isDisabled());
+ const outsider=players[6];await outsider.goto(multiUrl);await outsider.getByText('这个房间已满、已开始或已结束，无法加入。',{exact:true}).waitFor();assert.equal(await outsider.locator('[data-words=join]').count(),0);
+ for(const p of players.slice(0,6))await p.locator('[data-words=ready]').click();
+ await a.locator('#words-progress').filter({hasText:'6 / 6'}).waitFor();assert.equal(await a.locator('#words-word').count(),0,'Lobby must wait for host start');assert.equal(await b.locator('[data-words=start]').count(),0);
+ await shot(a,'word-meet-six-lobby-desktop.png');await a.locator('[data-words=start]').click();for(const p of players.slice(0,6))await p.locator('#words-word').waitFor();
+ const last=players[5];await last.locator('#words-word').fill('天空');await last.evaluate(()=>window.keptInput=document.querySelector('#words-word'));
+ for(const p of players.slice(0,5))await submit(p,'苹果');
+ await last.locator('#words-progress').filter({hasText:'5 / 6'}).waitFor();assert(!(await last.locator('#words-stage').innerText()).includes('苹果'));assert.equal(await last.inputValue('#words-word'),'天空');assert(await last.evaluate(()=>keptInput===document.querySelector('#words-word')));
+ await last.reload();await last.locator('#words-progress').filter({hasText:'5 / 6'}).waitFor();assert.equal(await last.inputValue('#words-word'),'天空');await submit(last,'天空');
+ await a.locator('#words-ready-control').waitFor();assert.equal(await a.locator('.words-success').count(),0);assert.equal(await a.locator('#words-stage .words-pair article').count(),6);
+ await last.locator('[data-language-select]').selectOption('en');await last.getByText('Use these words to get closer in the next round.',{exact:true}).waitFor();await shot(last,'word-meet-six-reveal-mobile.png');
+ for(const p of players.slice(0,6))await p.locator('[data-words=ready]').click();for(const p of players.slice(0,6))await p.locator('#words-word').waitFor();
+ for(const p of players.slice(0,6))await submit(p,'自由');
+ for(const p of players.slice(0,6)){await p.locator('.words-success').waitFor();assert.equal(await p.locator('.words-success .words-pair article').count(),6);assert.equal(await p.locator('.words-history-round').count(),2);}
+ await shot(a,'word-meet-six-success-desktop.png');await shot(last,'word-meet-six-success-mobile.png');
+ await last.goto(base+'/#account');await last.locator('.account-record-section').filter({hasText:'同词相遇'}).getByText('六人一起寻找同一个词',{exact:true}).waitFor();
+ for(const p of players)assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Multiplayer view must not overflow');
  for(const p of [a,b])assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Viewport must not overflow');
- assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,flows:['login guard','dual language','draft retention','refresh','server secrecy','three rounds','previous-word rejection','soft timeout','lost response retry','match','account records','interrupt privacy'],screenshots:shots}));
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,flows:['login guard','dual language','draft retention','refresh','server secrecy','three rounds','previous-word rejection','soft timeout','lost response retry','match','account records','interrupt privacy','six-player lobby','capacity limit','six-player secrecy','majority is not success','all-player match','six-player account history'],screenshots:shots}));
 }finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await db.close();}
